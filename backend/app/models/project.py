@@ -10,7 +10,7 @@ class Project(Base):
     __tablename__ = "projects"
     
     id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
-    user_id = Column(String(36), nullable=False, index=True, comment="用户ID")
+    user_id = Column(String(100), nullable=False, index=True, comment="用户ID")
     title = Column(String(200), nullable=False, comment="项目标题")
     description = Column(Text, comment="项目简介")
     theme = Column(Text, comment="主题")
