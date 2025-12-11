@@ -56,9 +56,10 @@ export default function UserManagement() {
   const [pageSize, setPageSize] = useState(20);
   const [currentPage, setCurrentPage] = useState(1);
   const [searchText, setSearchText] = useState('');
-  
+
   const [form] = Form.useForm();
   const [editForm] = Form.useForm();
+  const [modal, contextHolder] = Modal.useModal();
 
   // 过滤用户列表
   const filteredUsers = users.filter(user => {
@@ -94,10 +95,10 @@ export default function UserManagement() {
     try {
       const res = await adminApi.createUser(values);
       message.success('用户创建成功');
-      
+
       // 如果有默认密码，显示给管理员
       if (res.default_password) {
-        Modal.info({
+        modal.info({
           title: '用户创建成功',
           content: (
             <div>
@@ -112,7 +113,7 @@ export default function UserManagement() {
           centered: true,
         });
       }
-      
+
       setModalVisible(false);
       form.resetFields();
       loadUsers();
@@ -136,7 +137,7 @@ export default function UserManagement() {
 
   const handleUpdate = async (values: any) => {
     if (!currentUser) return;
-    
+
     try {
       await adminApi.updateUser(currentUser.user_id, values);
       message.success('用户信息更新成功');
@@ -153,7 +154,7 @@ export default function UserManagement() {
   const handleToggleStatus = async (user: UserWithStatus) => {
     const isActive = user.is_active !== false;
     const action = isActive ? '禁用' : '启用';
-    
+
     try {
       await adminApi.toggleUserStatus(user.user_id, !isActive);
       message.success(`用户已${action}`);
@@ -173,14 +174,14 @@ export default function UserManagement() {
 
   const handleResetPasswordConfirm = async () => {
     if (!currentUser) return;
-    
+
     try {
       const res = await adminApi.resetPassword(
         currentUser.user_id,
         newPassword || undefined
       );
-      
-      Modal.info({
+
+      modal.info({
         title: '密码重置成功',
         content: (
           <div>
@@ -194,7 +195,7 @@ export default function UserManagement() {
         width: 500,
         centered: true,
       });
-      
+
       setResetPasswordModalVisible(false);
       setNewPassword('');
     } catch (error) {
@@ -226,7 +227,7 @@ export default function UserManagement() {
       width: 150,
       render: (text: string) => (
         <Space>
-          <UserOutlined style={{ color: '#1890ff' }} />
+          <UserOutlined style={{ color: 'var(--color-primary)' }} />
           <Text strong>{text}</Text>
         </Space>
       ),
@@ -292,7 +293,7 @@ export default function UserManagement() {
       fixed: 'right' as const,
       render: (_: any, record: UserWithStatus) => {
         const isActive = record.is_active !== false;
-        
+
         // 移动端：使用下拉菜单
         if (isMobile) {
           const menuItems = [
@@ -314,7 +315,7 @@ export default function UserManagement() {
               icon: isActive ? <StopOutlined /> : <CheckCircleOutlined />,
               danger: isActive,
               onClick: () => {
-                Modal.confirm({
+                modal.confirm({
                   title: `确定${isActive ? '禁用' : '启用'}该用户吗？`,
                   onOk: () => handleToggleStatus(record),
                   okText: '确定',
@@ -328,7 +329,7 @@ export default function UserManagement() {
               icon: <DeleteOutlined />,
               danger: true,
               onClick: () => {
-                Modal.confirm({
+                modal.confirm({
                   title: '确定删除该用户吗？此操作不可恢复！',
                   onOk: () => handleDelete(record),
                   okText: '确定',
@@ -345,7 +346,7 @@ export default function UserManagement() {
             </Dropdown>
           );
         }
-        
+
         // 桌面端：保持原有按钮样式
         return (
           <Space size="small">
@@ -359,7 +360,7 @@ export default function UserManagement() {
                 编辑
               </Button>
             </Tooltip>
-            
+
             <Tooltip title="重置密码">
               <Button
                 type="link"
@@ -370,7 +371,7 @@ export default function UserManagement() {
                 重置密码
               </Button>
             </Tooltip>
-            
+
             <Popconfirm
               title={`确定${isActive ? '禁用' : '启用'}该用户吗？`}
               onConfirm={() => handleToggleStatus(record)}
@@ -388,7 +389,7 @@ export default function UserManagement() {
                 </Button>
               </Tooltip>
             </Popconfirm>
-            
+
             {!record.is_admin && (
               <Popconfirm
                 title="确定删除该用户吗？此操作不可恢复！"
@@ -418,12 +419,13 @@ export default function UserManagement() {
   return (
     <div style={{
       height: '100vh',
-      background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+      background: 'linear-gradient(180deg, var(--color-bg-base) 0%, #EEF2F3 100%)',
       padding: isMobile ? '20px 16px' : '40px 24px',
       display: 'flex',
       flexDirection: 'column',
       overflow: 'hidden',
     }}>
+      {contextHolder}
       <div style={{
         maxWidth: 1400,
         margin: '0 auto',
@@ -437,20 +439,28 @@ export default function UserManagement() {
         <Card
           variant="borderless"
           style={{
-            background: 'rgba(255, 255, 255, 0.95)',
-            borderRadius: isMobile ? 12 : 16,
-            boxShadow: '0 8px 32px rgba(0, 0, 0, 0.1)',
+            background: 'linear-gradient(135deg, var(--color-primary) 0%, #5A9BA5 50%, var(--color-primary-hover) 100%)',
+            borderRadius: isMobile ? 16 : 24,
+            boxShadow: '0 12px 40px rgba(77, 128, 136, 0.25), 0 4px 12px rgba(0, 0, 0, 0.06)',
             marginBottom: isMobile ? 20 : 24,
+            border: 'none',
+            position: 'relative',
+            overflow: 'hidden'
           }}
         >
-          <Row align="middle" justify="space-between" gutter={[16, 16]}>
+          {/* 装饰性背景元素 */}
+          <div style={{ position: 'absolute', top: -60, right: -60, width: 200, height: 200, borderRadius: '50%', background: 'rgba(255, 255, 255, 0.08)', pointerEvents: 'none' }} />
+          <div style={{ position: 'absolute', bottom: -40, left: '30%', width: 120, height: 120, borderRadius: '50%', background: 'rgba(255, 255, 255, 0.05)', pointerEvents: 'none' }} />
+          <div style={{ position: 'absolute', top: '50%', right: '15%', width: 80, height: 80, borderRadius: '50%', background: 'rgba(255, 255, 255, 0.06)', pointerEvents: 'none' }} />
+
+          <Row align="middle" justify="space-between" gutter={[16, 16]} style={{ position: 'relative', zIndex: 1 }}>
             <Col xs={24} sm={12}>
               <Space direction="vertical" size={4}>
-                <Title level={isMobile ? 3 : 2} style={{ margin: 0 }}>
-                  <TeamOutlined style={{ color: '#fa8c16', marginRight: 8 }} />
+                <Title level={isMobile ? 3 : 2} style={{ margin: 0, color: '#fff', textShadow: '0 2px 4px rgba(0,0,0,0.1)' }}>
+                  <TeamOutlined style={{ color: 'rgba(255,255,255,0.9)', marginRight: 12 }} />
                   用户管理
                 </Title>
-                <Text type="secondary" style={{ fontSize: isMobile ? 12 : 14 }}>
+                <Text style={{ fontSize: isMobile ? 12 : 14, color: 'rgba(255,255,255,0.85)' }}>
                   管理系统用户和权限
                 </Text>
               </Space>
@@ -461,20 +471,21 @@ export default function UserManagement() {
                   icon={<ArrowLeftOutlined />}
                   onClick={() => navigate('/')}
                   style={{
-                    borderRadius: 8,
-                    borderColor: '#d9d9d9',
-                    boxShadow: '0 2px 8px rgba(0, 0, 0, 0.08)',
+                    borderRadius: 12,
+                    background: 'rgba(255, 255, 255, 0.15)',
+                    border: '1px solid rgba(255, 255, 255, 0.3)',
+                    boxShadow: '0 2px 8px rgba(0, 0, 0, 0.1)',
+                    color: '#fff',
+                    backdropFilter: 'blur(10px)',
                     transition: 'all 0.3s ease'
                   }}
                   onMouseEnter={(e) => {
-                    e.currentTarget.style.borderColor = '#667eea';
-                    e.currentTarget.style.color = '#667eea';
-                    e.currentTarget.style.boxShadow = '0 2px 12px rgba(102, 126, 234, 0.3)';
+                    e.currentTarget.style.background = 'rgba(255, 255, 255, 0.25)';
+                    e.currentTarget.style.transform = 'translateY(-1px)';
                   }}
                   onMouseLeave={(e) => {
-                    e.currentTarget.style.borderColor = '#d9d9d9';
-                    e.currentTarget.style.color = 'rgba(0, 0, 0, 0.88)';
-                    e.currentTarget.style.boxShadow = '0 2px 8px rgba(0, 0, 0, 0.08)';
+                    e.currentTarget.style.background = 'rgba(255, 255, 255, 0.15)';
+                    e.currentTarget.style.transform = 'none';
                   }}
                 >
                   返回主页
@@ -484,10 +495,12 @@ export default function UserManagement() {
                   icon={<PlusOutlined />}
                   onClick={() => setModalVisible(true)}
                   style={{
-                    borderRadius: 8,
-                    background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
-                    border: 'none',
-                    boxShadow: '0 2px 8px rgba(102, 126, 234, 0.4)'
+                    borderRadius: 12,
+                    background: 'rgba(255, 193, 7, 0.95)',
+                    border: '1px solid rgba(255, 255, 255, 0.3)',
+                    boxShadow: '0 4px 16px rgba(255, 193, 7, 0.4)',
+                    color: '#fff',
+                    fontWeight: 600
                   }}
                 >
                   添加用户
@@ -502,9 +515,11 @@ export default function UserManagement() {
         <Card
           variant="borderless"
           style={{
-            background: 'rgba(255, 255, 255, 0.95)',
-            borderRadius: isMobile ? 12 : 16,
-            boxShadow: '0 8px 32px rgba(0, 0, 0, 0.1)',
+            background: 'rgba(255, 255, 255, 0.7)',
+            borderRadius: isMobile ? 16 : 24,
+            border: '1px solid rgba(255, 255, 255, 0.4)',
+            backdropFilter: 'blur(20px)',
+            boxShadow: '0 4px 24px rgba(0, 0, 0, 0.04)',
             flex: 1,
             display: 'flex',
             flexDirection: 'column',
@@ -521,7 +536,7 @@ export default function UserManagement() {
           {/* 搜索栏 */}
           <div style={{
             padding: '16px 24px 0 24px',
-            borderBottom: '1px solid #f0f0f0',
+            borderBottom: '1px solid rgba(0, 0, 0, 0.03)',
           }}>
             <Input
               placeholder="搜索用户名、显示名称或用户ID"
@@ -556,12 +571,12 @@ export default function UserManagement() {
               pagination={false}
             />
           </div>
-          
+
           {/* 固定分页控件 */}
           <div style={{
             padding: '16px 24px 24px 24px',
-            borderTop: '1px solid #f0f0f0',
-            background: 'rgba(255, 255, 255, 0.95)',
+            borderTop: '1px solid rgba(0, 0, 0, 0.03)',
+            background: 'transparent',
             display: 'flex',
             justifyContent: 'center',
           }}>

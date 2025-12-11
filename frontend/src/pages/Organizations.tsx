@@ -54,6 +54,7 @@ export default function Organizations() {
   const [editMemberForm] = Form.useForm();
   const [editOrgForm] = Form.useForm();
   const [isMobile, setIsMobile] = useState(window.innerWidth <= 768);
+  const [modal, contextHolder] = Modal.useModal();
 
   useEffect(() => {
     const handleResize = () => {
@@ -129,7 +130,7 @@ export default function Organizations() {
   };
 
   const handleRemoveMember = async (memberId: string) => {
-    Modal.confirm({
+    modal.confirm({
       title: '确认移除',
       content: '确定要移除该成员吗？',
       centered: true,
@@ -294,6 +295,7 @@ export default function Organizations() {
 
   return (
     <div>
+      {contextHolder}
       <Card
         title={
           <Space wrap>
@@ -326,7 +328,7 @@ export default function Organizations() {
                     hoverable
                     style={{
                       cursor: 'pointer',
-                      border: selectedOrg?.id === org.id ? '2px solid #1890ff' : '1px solid #d9d9d9'
+                      border: selectedOrg?.id === org.id ? '2px solid var(--color-primary)' : '1px solid var(--color-border-secondary)'
                     }}
                     onClick={() => handleSelectOrganization(org)}
                   >

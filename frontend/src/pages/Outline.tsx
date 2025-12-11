@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+﻿import { useState, useEffect } from 'react';
 import { Button, List, Modal, Form, Input, message, Empty, Space, Popconfirm, Card, Select, Radio, Tag, InputNumber, Tooltip, Tabs } from 'antd';
 import { EditOutlined, DeleteOutlined, ThunderboltOutlined, BranchesOutlined, AppstoreAddOutlined, CheckCircleOutlined, ExclamationCircleOutlined, PlusOutlined } from '@ant-design/icons';
 import { useStore } from '../store';
@@ -41,6 +41,7 @@ export default function Outline() {
   const [editForm] = Form.useForm();
   const [generateForm] = Form.useForm();
   const [expansionForm] = Form.useForm();
+  const [modalApi, contextHolder] = Modal.useModal();
   const [batchExpansionForm] = Form.useForm();
   const [manualCreateForm] = Form.useForm();
   const [isMobile, setIsMobile] = useState(window.innerWidth <= 768);
@@ -135,7 +136,7 @@ export default function Outline() {
     const outline = outlines.find(o => o.id === id);
     if (outline) {
       editForm.setFieldsValue(outline);
-      Modal.confirm({
+      modalApi.confirm({
         title: '编辑大纲',
         width: 600,
         centered: true,
@@ -335,7 +336,7 @@ export default function Outline() {
       }
     }
 
-    Modal.confirm({
+    modalApi.confirm({
       title: hasOutlines ? (
         <Space>
           <span>AI生成/续写大纲</span>
@@ -504,7 +505,7 @@ export default function Outline() {
                   console.log('已同步到Form，当前Form值:', generateForm.getFieldsValue());
                 }}
               />
-              <div style={{ color: '#666', fontSize: 12, marginTop: 4 }}>
+              <div style={{ color: 'var(--color-text-tertiary)', fontSize: 12, marginTop: 4 }}>
                 {defaultModel ? `当前默认模型: ${loadedModels.find(m => m.value === defaultModel)?.label || defaultModel}` : '未配置默认模型'}
               </div>
             </Form.Item>
@@ -526,7 +527,7 @@ export default function Outline() {
       ? Math.max(...outlines.map(o => o.order_index)) + 1
       : 1;
 
-    Modal.confirm({
+    modalApi.confirm({
       title: '手动创建大纲',
       width: 600,
       centered: true,
@@ -574,26 +575,26 @@ export default function Outline() {
         // 校验序号是否重复
         const existingOutline = outlines.find(o => o.order_index === values.order_index);
         if (existingOutline) {
-          Modal.warning({
+          modalApi.warning({
             title: '序号冲突',
             content: (
               <div>
                 <p>序号 <strong>{values.order_index}</strong> 已被使用：</p>
                 <div style={{
                   padding: 12,
-                  background: '#fff7e6',
+                  background: 'var(--color-warning-bg)',
                   borderRadius: 4,
-                  border: '1px solid #ffd591',
+                  border: '1px solid var(--color-warning-border)',
                   marginTop: 8
                 }}>
-                  <div style={{ fontWeight: 500, color: '#fa8c16' }}>
+                  <div style={{ fontWeight: 500, color: 'var(--color-warning)' }}>
                     {currentProject?.outline_mode === 'one-to-one'
                       ? `第${existingOutline.order_index}章`
                       : `第${existingOutline.order_index}卷`
                     }：{existingOutline.title}
                   </div>
                 </div>
-                <p style={{ marginTop: 12, color: '#666' }}>
+                <p style={{ marginTop: 12, color: 'var(--color-text-secondary)' }}>
                   💡 建议使用序号 <strong>{nextOrderIndex}</strong>，或选择其他未使用的序号
                 </p>
               </div>
@@ -644,7 +645,7 @@ export default function Outline() {
             if (!prevChapters.has_chapters) {
               // 如果前面有未展开的大纲，显示提示并阻止操作
               setIsExpanding(false);
-              Modal.warning({
+              modalApi.warning({
                 title: '请按顺序展开大纲',
                 width: 600,
                 centered: true,
@@ -655,18 +656,18 @@ export default function Outline() {
                     </p>
                     <div style={{
                       padding: 12,
-                      background: '#fff7e6',
+                      background: 'var(--color-warning-bg)',
                       borderRadius: 4,
-                      border: '1px solid #ffd591'
+                      border: '1px solid var(--color-warning-border)'
                     }}>
-                      <div style={{ fontWeight: 500, marginBottom: 8, color: '#fa8c16' }}>
+                      <div style={{ fontWeight: 500, marginBottom: 8, color: 'var(--color-warning)' }}>
                         ⚠️ 需要先展开：
                       </div>
-                      <div style={{ color: '#666' }}>
+                      <div style={{ color: 'var(--color-text-secondary)' }}>
                         第{prevOutline.order_index}卷：《{prevOutline.title}》
                       </div>
                     </div>
-                    <p style={{ marginTop: 12, color: '#666', fontSize: 13 }}>
+                    <p style={{ marginTop: 12, color: 'var(--color-text-secondary)', fontSize: 13 }}>
                       💡 提示：您也可以使用「批量展开」功能，系统会自动按顺序处理所有大纲。
                     </p>
                   </div>
@@ -694,7 +695,7 @@ export default function Outline() {
 
       // 如果没有章节，显示展开表单
       setIsExpanding(false);
-      Modal.confirm({
+      modalApi.confirm({
         title: (
           <Space>
             <BranchesOutlined />
@@ -705,9 +706,9 @@ export default function Outline() {
         centered: true,
         content: (
           <div>
-            <div style={{ marginBottom: 16, padding: 12, background: '#f5f5f5', borderRadius: 4 }}>
+            <div style={{ marginBottom: 16, padding: 12, background: 'var(--color-bg-layout)', borderRadius: 4 }}>
               <div style={{ fontWeight: 500, marginBottom: 4 }}>大纲标题</div>
-              <div style={{ color: '#666' }}>{outlineTitle}</div>
+              <div style={{ color: 'var(--color-text-secondary)' }}>{outlineTitle}</div>
             </div>
             <Form
               form={expansionForm}
@@ -855,10 +856,10 @@ export default function Outline() {
       }> | null;
     }
   ) => {
-    const modal = Modal.info({
+    modalApi.info({
       title: (
         <Space style={{ flexWrap: 'wrap' }}>
-          <CheckCircleOutlined style={{ color: '#52c41a' }} />
+          <CheckCircleOutlined style={{ color: 'var(--color-success)' }} />
           <span>已存在的展开章节</span>
         </Space>
       ),
@@ -876,20 +877,20 @@ export default function Outline() {
           overflowY: 'auto'
         }
       },
-      footer: (_, { OkBtn }) => (
+      footer: (_: any, { OkBtn }: any) => (
         <Space wrap style={{ width: '100%', justifyContent: isMobile ? 'center' : 'flex-end' }}>
           <Button
             danger
             icon={<DeleteOutlined />}
             onClick={() => {
-              modal.destroy();
-              Modal.confirm({
+              Modal.destroyAll();
+              modalApi.confirm({
                 title: '确认删除',
                 icon: <ExclamationCircleOutlined />,
                 content: (
                   <div>
                     <p>此操作将删除大纲《{outlineTitle}》展开的所有 <strong>{data.chapter_count}</strong> 个章节。</p>
-                    <p style={{ color: '#1890ff', marginTop: 8 }}>
+                    <p style={{ color: 'var(--color-primary)', marginTop: 8 }}>
                       📝 注意：大纲本身会保留，您可以重新展开
                     </p>
                     <p style={{ color: '#ff4d4f', marginTop: 8 }}>
@@ -1077,13 +1078,14 @@ export default function Outline() {
                           ))}
                         </Space>
                       </Card>
-                    )}
+                    )
+                    }
                   </Space>
-                </div>
+                </div >
               )
             }))}
           />
-        </div>
+        </div >
       ),
     });
   };
@@ -1093,10 +1095,10 @@ export default function Outline() {
     // 缓存AI生成的规划数据
     const cachedPlans = response.chapter_plans;
 
-    Modal.confirm({
+    modalApi.confirm({
       title: (
         <Space>
-          <CheckCircleOutlined style={{ color: '#52c41a' }} />
+          <CheckCircleOutlined style={{ color: 'var(--color-success)' }} />
           <span>展开规划预览</span>
         </Space>
       ),
@@ -1222,7 +1224,7 @@ export default function Outline() {
       return;
     }
 
-    Modal.confirm({
+    modalApi.confirm({
       title: (
         <Space>
           <AppstoreAddOutlined />
@@ -1233,7 +1235,7 @@ export default function Outline() {
       centered: true,
       content: (
         <div>
-          <div style={{ marginBottom: 16, padding: 12, background: '#fff3cd', borderRadius: 4 }}>
+          <div style={{ marginBottom: 16, padding: 12, background: 'var(--color-warning-bg)', borderRadius: 4 }}>
             <div style={{ color: '#856404' }}>
               ⚠️ 将对当前项目的所有 {outlines.length} 个大纲进行展开
             </div>
@@ -1361,11 +1363,11 @@ export default function Outline() {
           <div style={{
             marginBottom: 16,
             padding: 12,
-            background: '#fffbe6',
+            background: 'var(--color-warning-bg)',
             borderRadius: 4,
             border: '1px solid #ffe58f'
           }}>
-            <div style={{ fontWeight: 500, marginBottom: 8, color: '#faad14' }}>
+            <div style={{ fontWeight: 500, marginBottom: 8, color: 'var(--color-warning)' }}>
               ⚠️ 以下大纲已展开过，已自动跳过：
             </div>
             <Space direction="vertical" size="small" style={{ width: '100%' }}>
@@ -1404,7 +1406,7 @@ export default function Outline() {
                     background: selectedOutlineIdx === idx ? '#e6f7ff' : 'transparent',
                     borderRadius: 4,
                     marginBottom: 4,
-                    border: selectedOutlineIdx === idx ? '1px solid #1890ff' : '1px solid transparent'
+                    border: selectedOutlineIdx === idx ? '1px solid var(--color-primary)' : '1px solid transparent'
                   }}
                 >
                   <div style={{ width: '100%' }}>
@@ -1445,7 +1447,7 @@ export default function Outline() {
                       background: selectedChapterIdx === idx ? '#e6f7ff' : 'transparent',
                       borderRadius: 4,
                       marginBottom: 4,
-                      border: selectedChapterIdx === idx ? '1px solid #1890ff' : '1px solid transparent'
+                      border: selectedChapterIdx === idx ? '1px solid var(--color-primary)' : '1px solid transparent'
                     }}
                   >
                     <div style={{ width: '100%' }}>
@@ -1719,7 +1721,7 @@ export default function Outline() {
       <Modal
         title={
           <Space>
-            <ExclamationCircleOutlined style={{ color: '#faad14' }} />
+            <ExclamationCircleOutlined style={{ color: 'var(--color-warning)' }} />
             <span>确认引入新角色</span>
           </Space>
         }
@@ -1731,7 +1733,7 @@ export default function Outline() {
           handleConfirmCharacters(selectedCharacters);
         }}
         onCancel={() => {
-          Modal.confirm({
+          modalApi.confirm({
             title: '确认操作',
             content: '是否跳过角色创建，直接续写大纲？',
             okText: '跳过角色，继续续写',
@@ -1745,7 +1747,7 @@ export default function Outline() {
         cancelText="跳过角色创建"
       >
         <div>
-          <div style={{ marginBottom: 16, padding: 12, background: '#fffbe6', borderRadius: 4, border: '1px solid #ffe58f' }}>
+          <div style={{ marginBottom: 16, padding: 12, background: 'var(--color-warning-bg)', borderRadius: 4, border: '1px solid var(--color-warning-border)' }}>
             <div style={{ fontWeight: 500, marginBottom: 8, color: '#d48806' }}>
               AI 分析结果
             </div>
@@ -1785,7 +1787,7 @@ export default function Outline() {
                   padding: 12,
                   borderRadius: 4,
                   marginBottom: 8,
-                  border: selectedCharacterIndices.includes(index) ? '1px solid #1890ff' : '1px solid #f0f0f0',
+                  border: selectedCharacterIndices.includes(index) ? '1px solid var(--color-primary)' : '1px solid var(--color-border-secondary)',
                   cursor: 'pointer'
                 }}
                 onClick={() => {
@@ -1859,7 +1861,7 @@ export default function Outline() {
       <Modal
         title={
           <Space>
-            <CheckCircleOutlined style={{ color: '#52c41a' }} />
+            <CheckCircleOutlined style={{ color: 'var(--color-success)' }} />
             <span>批量展开规划预览</span>
           </Space>
         }
@@ -1875,6 +1877,7 @@ export default function Outline() {
         {renderBatchPreviewContent()}
       </Modal>
 
+      {contextHolder}
       {/* SSE进度Modal - 使用统一组件 */}
       <SSEProgressModal
         visible={sseModalVisible}
@@ -1889,7 +1892,7 @@ export default function Outline() {
           position: 'sticky',
           top: 0,
           zIndex: 10,
-          backgroundColor: '#fff',
+          backgroundColor: 'var(--color-bg-container)',
           padding: isMobile ? '12px 0' : '16px 0',
           marginBottom: isMobile ? 12 : 16,
           borderBottom: '1px solid #f0f0f0',
@@ -1992,7 +1995,7 @@ export default function Outline() {
                       <List.Item.Meta
                         title={
                           <Space size="small" style={{ fontSize: isMobile ? 14 : 16, flexWrap: 'wrap' }}>
-                            <span style={{ color: '#1890ff', fontWeight: 'bold' }}>
+                            <span style={{ color: 'var(--color-primary)', fontWeight: 'bold' }}>
                               {currentProject?.outline_mode === 'one-to-one'
                                 ? `第${item.order_index || '?'}章`
                                 : `第${item.order_index || '?'}卷`

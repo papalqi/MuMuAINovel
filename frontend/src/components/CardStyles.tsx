@@ -18,7 +18,7 @@ export const cardStyles = {
     // height: 320,
     display: 'flex',
     flexDirection: 'column',
-    borderColor: '#1890ff',
+    borderColor: 'var(--color-info)',
     borderRadius: 12,
   } as CSSProperties,
 
@@ -27,19 +27,20 @@ export const cardStyles = {
     // height: 320,
     display: 'flex',
     flexDirection: 'column',
-    borderColor: '#52c41a',
-    backgroundColor: '#f6ffed',
+    borderColor: 'var(--color-success)',
+    backgroundColor: 'var(--color-bg-base)', // 使用柔和的背景色
     borderRadius: 12,
   } as CSSProperties,
 
-  // 项目卡片样式
+  // 项目卡片样式 - 现代化设计
   project: {
     height: '100%',
-    borderRadius: 16,
+    borderRadius: 20,
     overflow: 'hidden',
-    background: '#fff',
-    boxShadow: '0 4px 16px rgba(0, 0, 0, 0.08)',
-    transition: 'all 0.3s ease',
+    background: 'var(--color-bg-container)',
+    boxShadow: '0 4px 20px rgba(0, 0, 0, 0.08), 0 1px 3px rgba(0, 0, 0, 0.04)',
+    transition: 'all 0.35s cubic-bezier(0.4, 0, 0.2, 1)',
+    border: '1px solid rgba(0, 0, 0, 0.04)',
   } as CSSProperties,
 
   // 卡片内容区域样式
@@ -73,17 +74,17 @@ export const cardStyles = {
   } as CSSProperties),
 };
 
-// 卡片悬浮动画
+// 卡片悬浮动画 - 增强版
 export const cardHoverHandlers = {
   onMouseEnter: (e: React.MouseEvent<HTMLDivElement>) => {
     const target = e.currentTarget;
-    target.style.transform = 'translateY(-8px)';
-    target.style.boxShadow = '0 12px 32px rgba(0, 0, 0, 0.15)';
+    target.style.transform = 'translateY(-10px) scale(1.01)';
+    target.style.boxShadow = '0 20px 40px rgba(77, 128, 136, 0.2), 0 8px 16px rgba(0, 0, 0, 0.08)';
   },
   onMouseLeave: (e: React.MouseEvent<HTMLDivElement>) => {
     const target = e.currentTarget;
-    target.style.transform = 'translateY(0)';
-    target.style.boxShadow = '0 4px 16px rgba(0, 0, 0, 0.08)';
+    target.style.transform = 'translateY(0) scale(1)';
+    target.style.boxShadow = '0 4px 20px rgba(0, 0, 0, 0.08), 0 1px 3px rgba(0, 0, 0, 0.04)';
   },
 };
 
@@ -113,12 +114,12 @@ export const textStyles = {
     fontSize: 12,
     color: 'rgba(0, 0, 0, 0.45)',
   } as CSSProperties,
-  
+
   value: {
     fontSize: 14,
     color: 'rgba(0, 0, 0, 0.85)',
   } as CSSProperties,
-  
+
   description: {
     fontSize: 12,
     color: 'rgba(0, 0, 0, 0.45)',

@@ -42,7 +42,7 @@ export default function SettingsPage() {
     try {
       const settings = await settingsApi.getSettings();
       form.setFieldsValue(settings);
-      
+
       // 判断是否为默认设置（id='0'表示来自.env的默认配置）
       if (settings.id === '0' || !settings.id) {
         setIsDefaultSettings(true);
@@ -164,7 +164,7 @@ export default function SettingsPage() {
         api_base_url: apiBaseUrl,
         provider: provider || 'openai'
       });
-      
+
       setModelOptions(response.models);
       setModelsFetched(true);
       if (!silent) {
@@ -202,7 +202,7 @@ export default function SettingsPage() {
 
     setTestingApi(true);
     setTestResult(null);
-    
+
     try {
       const result = await settingsApi.testApiConnection({
         api_key: apiKey,
@@ -210,10 +210,10 @@ export default function SettingsPage() {
         provider: provider,
         llm_model: modelName
       });
-      
+
       setTestResult(result);
       setShowTestResult(true);
-      
+
       if (result.success) {
         message.success(`测试成功！响应时间: ${result.response_time_ms}ms`);
       } else {
@@ -238,7 +238,7 @@ export default function SettingsPage() {
   return (
     <div style={{
       minHeight: '100vh',
-      background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+      background: 'var(--color-bg-base)',
       padding: isMobile ? '16px 12px' : '40px 24px'
     }}>
       <div style={{
@@ -248,9 +248,9 @@ export default function SettingsPage() {
         <Card
           variant="borderless"
           style={{
-            background: 'rgba(255, 255, 255, 0.95)',
+            background: 'var(--color-bg-container)',
             borderRadius: isMobile ? 12 : 16,
-            boxShadow: '0 8px 32px rgba(0, 0, 0, 0.1)',
+            boxShadow: 'var(--shadow-card)',
           }}
           styles={{
             body: {
@@ -281,7 +281,7 @@ export default function SettingsPage() {
                     fontSize: isMobile ? '18px' : undefined
                   }}
                 >
-                  <SettingOutlined style={{ marginRight: 8, color: '#667eea' }} />
+                  <SettingOutlined style={{ marginRight: 8, color: 'var(--color-primary)' }} />
                   {isMobile ? 'API 设置' : 'AI API 设置'}
                 </Title>
               </Space>
@@ -341,7 +341,7 @@ export default function SettingsPage() {
                     <Space size={4}>
                       <span>API 提供商</span>
                       <Tooltip title="选择你的AI服务提供商">
-                        <InfoCircleOutlined style={{ color: '#8c8c8c', fontSize: isMobile ? '12px' : '14px' }} />
+                        <InfoCircleOutlined style={{ color: 'var(--color-text-secondary)', fontSize: isMobile ? '12px' : '14px' }} />
                       </Tooltip>
                     </Space>
                   }
@@ -362,7 +362,7 @@ export default function SettingsPage() {
                     <Space size={4}>
                       <span>API 密钥</span>
                       <Tooltip title="你的API密钥，将加密存储">
-                        <InfoCircleOutlined style={{ color: '#8c8c8c', fontSize: isMobile ? '12px' : '14px' }} />
+                        <InfoCircleOutlined style={{ color: 'var(--color-text-secondary)', fontSize: isMobile ? '12px' : '14px' }} />
                       </Tooltip>
                     </Space>
                   }
@@ -381,7 +381,7 @@ export default function SettingsPage() {
                     <Space size={4}>
                       <span>API 地址</span>
                       <Tooltip title="API的基础URL地址">
-                        <InfoCircleOutlined style={{ color: '#8c8c8c', fontSize: isMobile ? '12px' : '14px' }} />
+                        <InfoCircleOutlined style={{ color: 'var(--color-text-secondary)', fontSize: isMobile ? '12px' : '14px' }} />
                       </Tooltip>
                     </Space>
                   }
@@ -402,7 +402,7 @@ export default function SettingsPage() {
                     <Space size={4}>
                       <span>模型名称</span>
                       <Tooltip title="AI模型的名称，如 gpt-4, gpt-3.5-turbo">
-                        <InfoCircleOutlined style={{ color: '#8c8c8c', fontSize: isMobile ? '12px' : '14px' }} />
+                        <InfoCircleOutlined style={{ color: 'var(--color-text-secondary)', fontSize: isMobile ? '12px' : '14px' }} />
                       </Tooltip>
                     </Space>
                   }
@@ -424,7 +424,7 @@ export default function SettingsPage() {
                       <>
                         {menu}
                         {fetchingModels && (
-                          <div style={{ padding: '8px 12px', color: '#8c8c8c', textAlign: 'center', fontSize: isMobile ? '12px' : '14px' }}>
+                          <div style={{ padding: '8px 12px', color: 'var(--color-text-secondary)', textAlign: 'center', fontSize: isMobile ? '12px' : '14px' }}>
                             <Spin size="small" /> 正在获取模型列表...
                           </div>
                         )}
@@ -434,7 +434,7 @@ export default function SettingsPage() {
                           </div>
                         )}
                         {!fetchingModels && modelOptions.length === 0 && !modelsFetched && (
-                          <div style={{ padding: '8px 12px', color: '#8c8c8c', textAlign: 'center', fontSize: isMobile ? '12px' : '14px' }}>
+                          <div style={{ padding: '8px 12px', color: 'var(--color-text-secondary)', textAlign: 'center', fontSize: isMobile ? '12px' : '14px' }}>
                             点击输入框自动获取模型列表
                           </div>
                         )}
@@ -446,7 +446,7 @@ export default function SettingsPage() {
                           <Spin size="small" /> 加载中...
                         </div>
                       ) : (
-                        <div style={{ padding: '8px 12px', color: '#8c8c8c', textAlign: 'center', fontSize: isMobile ? '12px' : '14px' }}>
+                        <div style={{ padding: '8px 12px', color: 'var(--color-text-secondary)', textAlign: 'center', fontSize: isMobile ? '12px' : '14px' }}>
                           未找到匹配的模型
                         </div>
                       )
@@ -506,7 +506,7 @@ export default function SettingsPage() {
                     <Space size={4}>
                       <span>温度参数</span>
                       <Tooltip title="控制输出的随机性，值越高越随机（0.0-2.0）">
-                        <InfoCircleOutlined style={{ color: '#8c8c8c', fontSize: isMobile ? '12px' : '14px' }} />
+                        <InfoCircleOutlined style={{ color: 'var(--color-text-secondary)', fontSize: isMobile ? '12px' : '14px' }} />
                       </Tooltip>
                     </Space>
                   }
@@ -530,7 +530,7 @@ export default function SettingsPage() {
                     <Space size={4}>
                       <span>最大 Token 数</span>
                       <Tooltip title="单次请求的最大token数量">
-                        <InfoCircleOutlined style={{ color: '#8c8c8c', fontSize: isMobile ? '12px' : '14px' }} />
+                        <InfoCircleOutlined style={{ color: 'var(--color-text-secondary)', fontSize: isMobile ? '12px' : '14px' }} />
                       </Tooltip>
                     </Space>
                   }
@@ -554,9 +554,9 @@ export default function SettingsPage() {
                     message={
                       <Space>
                         {testResult.success ? (
-                          <CheckCircleOutlined style={{ color: '#52c41a', fontSize: isMobile ? '16px' : '18px' }} />
+                          <CheckCircleOutlined style={{ color: 'var(--color-success)', fontSize: isMobile ? '16px' : '18px' }} />
                         ) : (
-                          <CloseCircleOutlined style={{ color: '#ff4d4f', fontSize: isMobile ? '16px' : '18px' }} />
+                          <CloseCircleOutlined style={{ color: 'var(--color-error)', fontSize: isMobile ? '16px' : '18px' }} />
                         )}
                         <span style={{ fontSize: isMobile ? '14px' : '16px', fontWeight: 500 }}>
                           {testResult.message}
@@ -585,7 +585,7 @@ export default function SettingsPage() {
                                 <div style={{ color: '#595959' }}>{testResult.response_preview}</div>
                               </div>
                             )}
-                            <div style={{ color: '#52c41a', fontSize: isMobile ? '12px' : '13px', marginTop: '4px' }}>
+                            <div style={{ color: 'var(--color-success)', fontSize: isMobile ? '12px' : '13px', marginTop: '4px' }}>
                               ✓ API 配置正确，可以正常使用
                             </div>
                           </Space>
@@ -604,7 +604,7 @@ export default function SettingsPage() {
                               </div>
                             )}
                             {testResult.error_type && (
-                              <div style={{ fontSize: isMobile ? '11px' : '12px', color: '#8c8c8c' }}>
+                              <div style={{ fontSize: isMobile ? '11px' : '12px', color: 'var(--color-text-secondary)' }}>
                                 错误类型: {testResult.error_type}
                               </div>
                             )}
@@ -639,61 +639,61 @@ export default function SettingsPage() {
                 {/* 操作按钮 */}
                 <Form.Item style={{ marginBottom: 0, marginTop: isMobile ? 24 : 32 }}>
                   {isMobile ? (
-                      // 移动端：垂直堆叠布局
-                      <Space direction="vertical" size="middle" style={{ width: '100%' }}>
+                    // 移动端：垂直堆叠布局
+                    <Space direction="vertical" size="middle" style={{ width: '100%' }}>
+                      <Button
+                        type="primary"
+                        size="large"
+                        icon={<SaveOutlined />}
+                        htmlType="submit"
+                        loading={loading}
+                        block
+                        style={{
+                          background: 'var(--color-primary)',
+                          border: 'none',
+                          height: '44px'
+                        }}
+                      >
+                        保存设置
+                      </Button>
+                      <Button
+                        size="large"
+                        icon={<ThunderboltOutlined />}
+                        onClick={handleTestConnection}
+                        loading={testingApi}
+                        block
+                        style={{
+                          borderColor: 'var(--color-success)',
+                          color: 'var(--color-success)',
+                          fontWeight: 500,
+                          height: '44px'
+                        }}
+                      >
+                        {testingApi ? '测试中...' : '测试连接'}
+                      </Button>
+                      <Space size="middle" style={{ width: '100%' }}>
                         <Button
-                          type="primary"
                           size="large"
-                          icon={<SaveOutlined />}
-                          htmlType="submit"
-                          loading={loading}
-                          block
-                          style={{
-                            background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
-                            border: 'none',
-                            height: '44px'
-                          }}
+                          icon={<ReloadOutlined />}
+                          onClick={handleReset}
+                          style={{ flex: 1, height: '44px' }}
                         >
-                          保存设置
+                          重置
                         </Button>
-                        <Button
-                          size="large"
-                          icon={<ThunderboltOutlined />}
-                          onClick={handleTestConnection}
-                          loading={testingApi}
-                          block
-                          style={{
-                            borderColor: '#52c41a',
-                            color: '#52c41a',
-                            fontWeight: 500,
-                            height: '44px'
-                          }}
-                        >
-                          {testingApi ? '测试中...' : '测试连接'}
-                        </Button>
-                        <Space size="middle" style={{ width: '100%' }}>
+                        {hasSettings && (
                           <Button
+                            danger
                             size="large"
-                            icon={<ReloadOutlined />}
-                            onClick={handleReset}
+                            icon={<DeleteOutlined />}
+                            onClick={handleDelete}
+                            loading={loading}
                             style={{ flex: 1, height: '44px' }}
                           >
-                            重置
+                            删除
                           </Button>
-                          {hasSettings && (
-                            <Button
-                              danger
-                              size="large"
-                              icon={<DeleteOutlined />}
-                              onClick={handleDelete}
-                              loading={loading}
-                              style={{ flex: 1, height: '44px' }}
-                            >
-                              删除
-                            </Button>
-                          )}
-                        </Space>
+                        )}
                       </Space>
+                    </Space>
                   ) : (
                     // 桌面端：删除在左边，测试、重置和保存在右边
                     <div style={{
@@ -720,7 +720,7 @@ export default function SettingsPage() {
                       ) : (
                         <div /> // 占位符，保持右侧按钮位置
                       )}
-                      
+
                       {/* 右侧：测试、重置和保存按钮组 */}
                       <Space size="middle">
                         <Button
@@ -729,8 +729,8 @@ export default function SettingsPage() {
                           onClick={handleTestConnection}
                           loading={testingApi}
                           style={{
-                            borderColor: '#52c41a',
-                            color: '#52c41a',
+                            borderColor: 'var(--color-success)',
+                            color: 'var(--color-success)',
                             fontWeight: 500,
                             minWidth: '100px'
                           }}
@@ -754,7 +754,7 @@ export default function SettingsPage() {
                           htmlType="submit"
                           loading={loading}
                           style={{
-                            background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+                            background: 'var(--color-primary)',
                             border: 'none',
                             minWidth: '120px',
                             fontWeight: 500

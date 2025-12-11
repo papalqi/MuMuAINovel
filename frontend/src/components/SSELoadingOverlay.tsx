@@ -41,14 +41,14 @@ export const SSELoadingOverlay: React.FC<SSELoadingOverlayProps> = ({
           textAlign: 'center',
           marginBottom: 24
         }}>
-          <Spin 
-            indicator={<LoadingOutlined style={{ fontSize: 48, color: '#1890ff' }} spin />} 
+          <Spin
+            indicator={<LoadingOutlined style={{ fontSize: 48, color: 'var(--color-primary)' }} spin />}
           />
           <div style={{
             fontSize: 20,
             fontWeight: 'bold',
             marginTop: 16,
-            color: '#262626'
+            color: 'var(--color-text-primary)'
           }}>
             AI生成中...
           </div>
@@ -60,29 +60,29 @@ export const SSELoadingOverlay: React.FC<SSELoadingOverlayProps> = ({
         }}>
           <div style={{
             height: 12,
-            background: '#f0f0f0',
+            background: 'var(--color-bg-layout)',
             borderRadius: 6,
             overflow: 'hidden',
             marginBottom: 12
           }}>
             <div style={{
               height: '100%',
-              background: progress === 100 
-                ? 'linear-gradient(90deg, #52c41a 0%, #73d13d 100%)'
-                : 'linear-gradient(90deg, #1890ff 0%, #40a9ff 100%)',
+              background: progress === 100
+                ? 'linear-gradient(90deg, var(--color-success) 0%, var(--color-success-active) 100%)'
+                : 'linear-gradient(90deg, var(--color-primary) 0%, var(--color-primary-active) 100%)',
               width: `${progress}%`,
               transition: 'all 0.3s ease',
               borderRadius: 6,
-              boxShadow: progress > 0 ? '0 0 10px rgba(24, 144, 255, 0.3)' : 'none'
+              boxShadow: progress > 0 ? 'var(--shadow-card)' : 'none'
             }} />
           </div>
-          
+
           {/* 进度百分比 */}
           <div style={{
             textAlign: 'center',
             fontSize: 32,
             fontWeight: 'bold',
-            color: progress === 100 ? '#52c41a' : '#1890ff',
+            color: progress === 100 ? 'var(--color-success)' : 'var(--color-primary)',
             marginBottom: 8
           }}>
             {progress}%

@@ -28,17 +28,17 @@ const sponsorOptions: SponsorOption[] = [
 
 const benefits = [
     {
-        icon: <FileTextOutlined style={{ fontSize: '32px', color: '#1890ff' }} />,
+        icon: <FileTextOutlined style={{ fontSize: '32px', color: 'var(--color-primary)' }} />,
         title: '优先需求响应',
         description: '您的功能需求和问题反馈将获得优先处理'
     },
     {
-        icon: <RocketOutlined style={{ fontSize: '32px', color: '#52c41a' }} />,
+        icon: <RocketOutlined style={{ fontSize: '32px', color: 'var(--color-success)' }} />,
         title: 'Windows一键启动',
         description: '获取免安装EXE程序，双击即可使用'
     },
     {
-        icon: <MessageOutlined style={{ fontSize: '32px', color: '#fa8c16' }} />,
+        icon: <MessageOutlined style={{ fontSize: '32px', color: 'var(--color-warning)' }} />,
         title: '专属技术支持',
         description: '加入赞助者群，获得远程协助和配置指导'
     }
@@ -75,7 +75,7 @@ export default function Sponsor() {
                     <div style={{
                         marginTop: '16px',
                         padding: '16px',
-                        background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+                        background: 'var(--color-primary)',
                         borderRadius: '12px',
                         color: '#fff'
                     }}>
@@ -91,7 +91,7 @@ export default function Sponsor() {
                 {/* 赞助专属权益 */}
                 <div style={{ marginBottom: '32px' }}>
                     <Title level={3} style={{ textAlign: 'center', marginBottom: '20px' }}>
-                        <CheckCircleOutlined style={{ color: '#52c41a', marginRight: '8px' }} />
+                        <CheckCircleOutlined style={{ color: 'var(--color-success)', marginRight: '8px' }} />
                         赞助专属权益
                     </Title>
 
@@ -139,27 +139,27 @@ export default function Sponsor() {
                                     style={{
                                         textAlign: 'center',
                                         borderRadius: '10px',
-                                        boxShadow: '0 2px 8px rgba(0,0,0,0.08)',
+                                        boxShadow: 'var(--shadow-card)',
                                         cursor: 'pointer',
                                         transition: 'all 0.3s',
-                                        border: '2px solid #f0f0f0'
+                                        border: '2px solid var(--color-border)'
                                     }}
                                     styles={{
                                         body: { padding: '20px 12px' }
                                     }}
                                     onMouseEnter={(e) => {
                                         e.currentTarget.style.transform = 'translateY(-8px)';
-                                        e.currentTarget.style.boxShadow = '0 8px 24px rgba(0,0,0,0.15)';
-                                        e.currentTarget.style.borderColor = '#1890ff';
+                                        e.currentTarget.style.boxShadow = 'var(--shadow-elevated)';
+                                        e.currentTarget.style.borderColor = 'var(--color-primary)';
                                     }}
                                     onMouseLeave={(e) => {
                                         e.currentTarget.style.transform = 'translateY(0)';
-                                        e.currentTarget.style.boxShadow = '0 4px 12px rgba(0,0,0,0.08)';
-                                        e.currentTarget.style.borderColor = '#f0f0f0';
+                                        e.currentTarget.style.boxShadow = 'var(--shadow-card)';
+                                        e.currentTarget.style.borderColor = 'var(--color-border)';
                                     }}
                                 >
                                     <Title level={3} style={{
-                                        color: '#1890ff',
+                                        color: 'var(--color-primary)',
                                         marginBottom: '4px',
                                         fontSize: '28px',
                                         fontWeight: 'bold'

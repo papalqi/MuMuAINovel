@@ -122,23 +122,23 @@ export default function UserMenu() {
             alignItems: 'center',
             gap: 12,
             padding: '8px 16px',
-            background: 'rgba(255, 255, 255, 0.95)',
+            background: 'rgba(255, 255, 255, 0.6)', // 保持半透明以配合 Backdrop
             backdropFilter: 'blur(10px)',
             WebkitBackdropFilter: 'blur(10px)',
             borderRadius: 24,
-            border: '1px solid rgba(102, 126, 234, 0.2)',
+            border: '1px solid var(--color-border)',
             transition: 'all 0.3s ease',
-            boxShadow: '0 2px 8px rgba(0, 0, 0, 0.1)',
+            boxShadow: 'var(--shadow-card)',
           }}
           onMouseEnter={(e) => {
-            e.currentTarget.style.background = 'rgba(255, 255, 255, 1)';
+            e.currentTarget.style.background = 'var(--color-bg-container)'; // 悬浮时变实
             e.currentTarget.style.transform = 'translateY(-2px)';
-            e.currentTarget.style.boxShadow = '0 4px 12px rgba(102, 126, 234, 0.3)';
+            e.currentTarget.style.boxShadow = 'var(--shadow-elevated)';
           }}
           onMouseLeave={(e) => {
-            e.currentTarget.style.background = 'rgba(255, 255, 255, 0.95)';
+            e.currentTarget.style.background = 'rgba(255, 255, 255, 0.6)';
             e.currentTarget.style.transform = 'translateY(0)';
-            e.currentTarget.style.boxShadow = '0 2px 8px rgba(0, 0, 0, 0.1)';
+            e.currentTarget.style.boxShadow = 'var(--shadow-card)';
           }}
         >
           <div style={{ position: 'relative' }}>
@@ -147,9 +147,9 @@ export default function UserMenu() {
               icon={<UserOutlined />}
               size={40}
               style={{
-                backgroundColor: '#1890ff',
+                backgroundColor: 'var(--color-primary)',
                 border: '3px solid #fff',
-                boxShadow: '0 2px 8px rgba(102, 126, 234, 0.3)',
+                boxShadow: 'var(--shadow-card)',
               }}
             />
             {currentUser.is_admin && (
@@ -173,14 +173,14 @@ export default function UserMenu() {
           </div>
           <Space direction="vertical" size={0} style={{ display: window.innerWidth <= 768 ? 'none' : 'flex' }}>
             <Text strong style={{
-              color: '#262626',
+              color: 'var(--color-text-primary)',
               fontSize: 14,
               lineHeight: '20px',
             }}>
               {currentUser.display_name || currentUser.username}
             </Text>
             <Text style={{
-              color: '#8c8c8c',
+              color: 'var(--color-text-secondary)',
               fontSize: 12,
               lineHeight: '18px',
             }}>

@@ -193,7 +193,7 @@ export default function ProjectDetail() {
   return (
     <Layout style={{ minHeight: '100vh', height: '100vh', overflow: 'hidden' }}>
       <Header style={{
-        background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+        background: 'var(--color-primary)',
         padding: mobile ? '0 12px' : '0 24px',
         display: 'flex',
         alignItems: 'center',
@@ -203,7 +203,7 @@ export default function ProjectDetail() {
         left: 0,
         right: 0,
         zIndex: 1000,
-        boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
+        boxShadow: 'var(--shadow-header)',
         height: mobile ? 56 : 70
       }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px', zIndex: 1 }}>
@@ -279,7 +279,7 @@ export default function ProjectDetail() {
                 <Card
                   size="small"
                   style={{
-                    background: 'rgba(255,255,255,0.95)',
+                    background: 'var(--color-bg-container)',
                     borderRadius: '6px',
                     border: 'none',
                     minWidth: '80px',
@@ -289,10 +289,10 @@ export default function ProjectDetail() {
                   styles={{ body: { padding: '8px' } }}
                 >
                   <Statistic
-                    title={<span style={{ fontSize: '11px', color: '#666' }}>大纲</span>}
+                    title={<span style={{ fontSize: '11px', color: 'var(--color-text-secondary)' }}>大纲</span>}
                     value={outlines.length}
                     suffix="条"
-                    valueStyle={{ fontSize: '16px', fontWeight: 600, color: '#667eea' }}
+                    valueStyle={{ fontSize: '16px', fontWeight: 600, color: 'var(--color-primary)' }}
                   />
                 </Card>
               </Col>
@@ -300,7 +300,7 @@ export default function ProjectDetail() {
                 <Card
                   size="small"
                   style={{
-                    background: 'rgba(255,255,255,0.95)',
+                    background: 'var(--color-bg-container)',
                     borderRadius: '6px',
                     border: 'none',
                     minWidth: '80px',
@@ -310,10 +310,10 @@ export default function ProjectDetail() {
                   styles={{ body: { padding: '8px' } }}
                 >
                   <Statistic
-                    title={<span style={{ fontSize: '11px', color: '#666' }}>角色</span>}
+                    title={<span style={{ fontSize: '11px', color: 'var(--color-text-secondary)' }}>角色</span>}
                     value={characters.length}
                     suffix="个"
-                    valueStyle={{ fontSize: '16px', fontWeight: 600, color: '#52c41a' }}
+                    valueStyle={{ fontSize: '16px', fontWeight: 600, color: 'var(--color-success)' }}
                   />
                 </Card>
               </Col>
@@ -321,7 +321,7 @@ export default function ProjectDetail() {
                 <Card
                   size="small"
                   style={{
-                    background: 'rgba(255,255,255,0.95)',
+                    background: 'var(--color-bg-container)',
                     borderRadius: '6px',
                     border: 'none',
                     minWidth: '80px',
@@ -331,10 +331,10 @@ export default function ProjectDetail() {
                   styles={{ body: { padding: '8px' } }}
                 >
                   <Statistic
-                    title={<span style={{ fontSize: '11px', color: '#666' }}>章节</span>}
+                    title={<span style={{ fontSize: '11px', color: 'var(--color-text-secondary)' }}>章节</span>}
                     value={chapters.length}
                     suffix="章"
-                    valueStyle={{ fontSize: '16px', fontWeight: 600, color: '#1890ff' }}
+                    valueStyle={{ fontSize: '16px', fontWeight: 600, color: 'var(--color-info)' }}
                   />
                 </Card>
               </Col>
@@ -342,7 +342,7 @@ export default function ProjectDetail() {
                 <Card
                   size="small"
                   style={{
-                    background: 'rgba(255,255,255,0.95)',
+                    background: 'var(--color-bg-container)',
                     borderRadius: '6px',
                     border: 'none',
                     minWidth: '80px',
@@ -352,10 +352,10 @@ export default function ProjectDetail() {
                   styles={{ body: { padding: '8px' } }}
                 >
                   <Statistic
-                    title={<span style={{ fontSize: '11px', color: '#666' }}>已写</span>}
+                    title={<span style={{ fontSize: '11px', color: 'var(--color-text-secondary)' }}>已写</span>}
                     value={currentProject.current_words}
                     suffix="字"
-                    valueStyle={{ fontSize: '16px', fontWeight: 600, color: '#fa8c16' }}
+                    valueStyle={{ fontSize: '16px', fontWeight: 600, color: 'var(--color-warning)' }}
                   />
                 </Card>
               </Col>
@@ -384,15 +384,14 @@ export default function ProjectDetail() {
             trigger={null}
             width={220}
             collapsedWidth={60}
+            className="modern-sider"
             style={{
-              background: '#fff',
               position: 'fixed',
               left: 0,
               top: 70,
               bottom: 0,
               overflow: 'hidden',
-              boxShadow: '2px 0 12px rgba(0,0,0,0.08)',
-              transition: 'all 0.2s',
+              transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
               height: 'calc(100vh - 70px)'
             }}
           >
@@ -412,7 +411,7 @@ export default function ProjectDetail() {
         }}>
           <Content
             style={{
-              background: '#f5f7fa',
+              background: 'var(--color-bg-base)',
               padding: mobile ? 12 : 24,
               height: mobile ? 'calc(100vh - 56px)' : 'calc(100vh - 70px)',
               overflow: 'hidden',
@@ -421,10 +420,10 @@ export default function ProjectDetail() {
             }}
           >
             <div style={{
-              background: '#fff',
+              background: 'var(--color-bg-container)',
               padding: mobile ? 12 : 24,
               borderRadius: mobile ? '8px' : '12px',
-              boxShadow: '0 2px 8px rgba(0,0,0,0.06)',
+              boxShadow: 'var(--shadow-card)',
               height: '100%',
               overflow: 'hidden',
               display: 'flex',

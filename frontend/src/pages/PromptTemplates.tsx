@@ -193,39 +193,45 @@ export default function PromptTemplates() {
   return (
     <div style={{
       minHeight: '100vh',
-      background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
-      padding: isMobile ? '20px 16px' : '40px 24px'
+      background: 'linear-gradient(180deg, var(--color-bg-base) 0%, #EEF2F3 100%)',
+      padding: isMobile ? '20px 16px' : '40px 24px',
+      display: 'flex',
+      flexDirection: 'column',
     }}>
-      {/* 头部卡片 */}
       <div style={{
         maxWidth: 1400,
         margin: '0 auto',
-        marginBottom: isMobile ? 20 : 40
+        width: '100%',
+        flex: 1,
+        display: 'flex',
+        flexDirection: 'column',
       }}>
+        {/* 顶部导航卡片 */}
         <Card
           variant="borderless"
           style={{
-            background: 'rgba(255, 255, 255, 0.95)',
-            borderRadius: isMobile ? 12 : 16,
-            boxShadow: '0 8px 32px rgba(0, 0, 0, 0.1)',
+            background: 'linear-gradient(135deg, var(--color-primary) 0%, #5A9BA5 50%, var(--color-primary-hover) 100%)',
+            borderRadius: isMobile ? 16 : 24,
+            boxShadow: '0 12px 40px rgba(77, 128, 136, 0.25), 0 4px 12px rgba(0, 0, 0, 0.06)',
+            marginBottom: isMobile ? 20 : 24,
+            border: 'none',
+            position: 'relative',
+            overflow: 'hidden'
           }}
         >
-          <Row align="middle" justify="space-between" gutter={[16, 16]}>
+          {/* 装饰性背景元素 */}
+          <div style={{ position: 'absolute', top: -60, right: -60, width: 200, height: 200, borderRadius: '50%', background: 'rgba(255, 255, 255, 0.08)', pointerEvents: 'none' }} />
+          <div style={{ position: 'absolute', bottom: -40, left: '30%', width: 120, height: 120, borderRadius: '50%', background: 'rgba(255, 255, 255, 0.05)', pointerEvents: 'none' }} />
+          <div style={{ position: 'absolute', top: '50%', right: '15%', width: 80, height: 80, borderRadius: '50%', background: 'rgba(255, 255, 255, 0.06)', pointerEvents: 'none' }} />
+
+          <Row align="middle" justify="space-between" gutter={[16, 16]} style={{ position: 'relative', zIndex: 1 }}>
             <Col xs={24} sm={12} md={14}>
               <Space direction="vertical" size={4}>
-                <Space align="center">
-                  <Button
-                    type="text"
-                    icon={<ArrowLeftOutlined />}
-                    onClick={() => navigate('/projects')}
-                    size={isMobile ? 'small' : 'middle'}
-                  />
-                  <Title level={isMobile ? 3 : 2} style={{ margin: 0 }}>
-                    <FileSearchOutlined style={{ color: '#667eea', marginRight: 8 }} />
-                    提示词模板管理
-                  </Title>
-                </Space>
-                <Text type="secondary" style={{ fontSize: isMobile ? 12 : 14, marginLeft: isMobile ? 40 : 48 }}>
+                <Title level={isMobile ? 3 : 2} style={{ margin: 0, color: '#fff', textShadow: '0 2px 4px rgba(0,0,0,0.1)' }}>
+                  <FileSearchOutlined style={{ color: 'rgba(255,255,255,0.9)', marginRight: 8 }} />
+                  提示词模板管理
+                </Title>
+                <Text style={{ fontSize: isMobile ? 12 : 14, color: 'rgba(255,255,255,0.85)', marginLeft: isMobile ? 40 : 48 }}>
                   自定义AI生成提示词，打造个性化创作体验
                 </Text>
               </Space>
@@ -233,10 +239,41 @@ export default function PromptTemplates() {
             <Col xs={24} sm={12} md={10}>
               <Space wrap style={{ justifyContent: isMobile ? 'flex-start' : 'flex-end', width: '100%' }}>
                 <Button
+                  icon={<ArrowLeftOutlined />}
+                  onClick={() => navigate('/projects')}
+                  style={{
+                    borderRadius: 12,
+                    background: 'rgba(255, 255, 255, 0.15)',
+                    border: '1px solid rgba(255, 255, 255, 0.3)',
+                    boxShadow: '0 2px 8px rgba(0, 0, 0, 0.1)',
+                    color: '#fff',
+                    backdropFilter: 'blur(10px)',
+                    transition: 'all 0.3s ease'
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.background = 'rgba(255, 255, 255, 0.25)';
+                    e.currentTarget.style.transform = 'translateY(-1px)';
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.background = 'rgba(255, 255, 255, 0.15)';
+                    e.currentTarget.style.transform = 'none';
+                  }}
+                >
+                  返回项目
+                </Button>
+                <Button
                   icon={<DownloadOutlined />}
                   onClick={handleExport}
                   size={isMobile ? 'small' : 'middle'}
-                  style={{ borderRadius: 8 }}
+                  style={{
+                    borderRadius: 12,
+                    background: 'rgba(255, 255, 255, 0.15)',
+                    border: '1px solid rgba(255, 255, 255, 0.3)',
+                    boxShadow: '0 2px 8px rgba(0, 0, 0, 0.1)',
+                    color: '#fff',
+                    backdropFilter: 'blur(10px)',
+                    transition: 'all 0.3s ease'
+                  }}
                 >
                   导出配置
                 </Button>
@@ -248,7 +285,14 @@ export default function PromptTemplates() {
                   <Button
                     icon={<UploadOutlined />}
                     size={isMobile ? 'small' : 'middle'}
-                    style={{ borderRadius: 8 }}
+                    style={{
+                      borderRadius: 12,
+                      background: 'rgba(255, 255, 255, 0.15)',
+                      border: '1px solid rgba(255, 255, 255, 0.3)',
+                      boxShadow: '0 2px 8px rgba(0, 0, 0, 0.1)',
+                      color: '#fff',
+                      backdropFilter: 'blur(10px)',
+                    }}
                   >
                     导入配置
                   </Button>
@@ -261,7 +305,7 @@ export default function PromptTemplates() {
           <Alert
             message={
               <Space align="center">
-                <InfoCircleOutlined style={{ fontSize: 16, color: '#1890ff' }} />
+                <InfoCircleOutlined style={{ fontSize: 16, color: 'var(--color-primary)' }} />
                 <Text strong style={{ fontSize: isMobile ? 13 : 14 }}>使用说明</Text>
               </Space>
             }
@@ -280,151 +324,151 @@ export default function PromptTemplates() {
             style={{
               marginTop: isMobile ? 16 : 24,
               borderRadius: 12,
-              background: 'linear-gradient(135deg, #e6f7ff 0%, #f0f5ff 100%)',
-              border: '1px solid #91d5ff'
+              background: 'var(--color-info-bg)',
+              border: '1px solid var(--color-info-border)'
             }}
           />
         </Card>
-      </div>
 
-      {/* 主内容区 */}
-      <div style={{ maxWidth: 1400, margin: '0 auto' }}>
-        <Spin spinning={loading}>
-          {/* 分类标签 */}
-          {categories.length > 0 && (
-            <Card
-              variant="borderless"
-              style={{
-                background: 'rgba(255, 255, 255, 0.95)',
-                borderRadius: isMobile ? 12 : 16,
-                boxShadow: '0 8px 32px rgba(0, 0, 0, 0.1)',
-                marginBottom: isMobile ? 16 : 24
-              }}
-              styles={{ body: { padding: isMobile ? '12px' : '16px' } }}
-            >
-              <Tabs
-                activeKey={selectedCategory}
-                onChange={setSelectedCategory}
-                items={[
-                  { key: '0', label: `全部 (${categories.reduce((sum, cat) => sum + cat.count, 0)})` },
-                  ...categories.map((cat, index) => ({
-                    key: (index + 1).toString(),
-                    label: `${cat.category} (${cat.count})`
-                  }))
-                ]}
-              />
-            </Card>
-          )}
+        {/* 主内容区 */}
+        <div style={{ flex: 1 }}>
+          <Spin spinning={loading}>
+            {/* 分类标签 */}
+            {categories.length > 0 && (
+              <Card
+                variant="borderless"
+                style={{
+                  background: 'rgba(255, 255, 255, 0.95)',
+                  borderRadius: isMobile ? 12 : 16,
+                  boxShadow: '0 8px 32px rgba(0, 0, 0, 0.1)',
+                  marginBottom: isMobile ? 16 : 24
+                }}
+                styles={{ body: { padding: isMobile ? '12px' : '16px' } }}
+              >
+                <Tabs
+                  activeKey={selectedCategory}
+                  onChange={setSelectedCategory}
+                  items={[
+                    { key: '0', label: `全部 (${categories.reduce((sum, cat) => sum + cat.count, 0)})` },
+                    ...categories.map((cat, index) => ({
+                      key: (index + 1).toString(),
+                      label: `${cat.category} (${cat.count})`
+                    }))
+                  ]}
+                />
+              </Card>
+            )}
 
-          {/* 模板列表 */}
-          {currentTemplates.length === 0 ? (
-            <Card
-              variant="borderless"
-              style={{
-                background: 'rgba(255, 255, 255, 0.95)',
-                borderRadius: 16,
-                boxShadow: '0 8px 32px rgba(0, 0, 0, 0.1)',
-              }}
-            >
-              <Empty
-                description="暂无模板数据"
-                style={{ padding: '80px 0' }}
-              />
-            </Card>
-          ) : (
-            <Row gutter={[16, 16]}>
-              {currentTemplates.map(template => (
-                <Col {...gridConfig} key={template.id}>
-                  <Card
-                    hoverable
-                    variant="borderless"
-                    style={cardStyles.project}
-                    styles={{ body: { padding: 0, overflow: 'hidden' } }}
-                    {...cardHoverHandlers}
-                  >
-                    {/* 头部 */}
-                    <div style={{
-                      background: template.is_system_default
-                        ? 'linear-gradient(135deg, #a8a8a8 0%, #636363 100%)'
-                        : 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
-                      padding: isMobile ? '16px' : '20px',
-                      position: 'relative'
-                    }}>
-                      <Space direction="vertical" size={8} style={{ width: '100%' }}>
-                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                          <Title level={isMobile ? 5 : 4} style={{ margin: 0, color: '#fff', flex: 1 }} ellipsis>
-                            {template.template_name}
-                          </Title>
-                          {!template.is_system_default && (
-                            <Switch
-                              checked={template.is_active}
-                              onChange={(checked) => handleToggleActive(template, checked)}
-                              size={isMobile ? 'small' : 'default'}
-                              style={{ marginLeft: 8 }}
-                            />
-                          )}
-                        </div>
-                        <Space wrap>
-                          <Tag color="rgba(255,255,255,0.3)" style={{ color: '#fff', border: 'none' }}>
-                            {template.category}
-                          </Tag>
-                          <Tag color="rgba(255,255,255,0.3)" style={{ color: '#fff', border: 'none' }}>
-                            {template.is_system_default ? '系统默认' : '已自定义'}
+            {/* 模板列表 */}
+            {currentTemplates.length === 0 ? (
+              <Card
+                variant="borderless"
+                style={{
+                  background: 'rgba(255, 255, 255, 0.95)',
+                  borderRadius: isMobile ? 12 : 16,
+                  boxShadow: '0 8px 32px rgba(0, 0, 0, 0.1)',
+                }}
+              >
+                <Empty
+                  description="暂无模板数据"
+                  style={{ padding: '80px 0' }}
+                />
+              </Card>
+            ) : (
+              <Row gutter={[16, 16]}>
+                {currentTemplates.map(template => (
+                  <Col {...gridConfig} key={template.id}>
+                    <Card
+                      hoverable
+                      variant="borderless"
+                      style={cardStyles.project}
+                      styles={{ body: { padding: 0, overflow: 'hidden' } }}
+                      {...cardHoverHandlers}
+                    >
+                      {/* 头部 */}
+                      <div style={{
+                        background: template.is_system_default
+                          ? 'var(--color-bg-layout)'
+                          : 'var(--color-primary)',
+                        padding: isMobile ? '16px' : '20px',
+                        position: 'relative'
+                      }}>
+                        <Space direction="vertical" size={8} style={{ width: '100%' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                            <Title level={isMobile ? 5 : 4} style={{ margin: 0, color: template.is_system_default ? 'var(--color-text-primary)' : '#fff', flex: 1 }} ellipsis>
+                              {template.template_name}
+                            </Title>
+                            {!template.is_system_default && (
+                              <Switch
+                                checked={template.is_active}
+                                onChange={(checked) => handleToggleActive(template, checked)}
+                                size={isMobile ? 'small' : 'default'}
+                                style={{ marginLeft: 8 }}
+                              />
+                            )}
+                          </div>
+                          <Space wrap>
+                            <Tag color={template.is_system_default ? 'default' : 'rgba(255,255,255,0.3)'} style={{ color: template.is_system_default ? 'var(--color-text-secondary)' : '#fff', border: 'none' }}>
+                              {template.category}
+                            </Tag>
+                            <Tag color={template.is_system_default ? 'default' : 'rgba(255,255,255,0.3)'} style={{ color: template.is_system_default ? 'var(--color-text-secondary)' : '#fff', border: 'none' }}>
+                              {template.is_system_default ? '系统默认' : '已自定义'}
+                            </Tag>
+                          </Space>
+                        </Space>
+                      </div>
+
+                      {/* 内容 */}
+                      <div style={{ padding: isMobile ? '16px' : '20px' }}>
+                        <Paragraph
+                          type="secondary"
+                          ellipsis={{ rows: 3 }}
+                          style={{ minHeight: 66, marginBottom: 16 }}
+                        >
+                          {template.description || '暂无描述'}
+                        </Paragraph>
+
+                        <Space wrap style={{ marginBottom: 16 }}>
+                          <Tag
+                            icon={<CheckCircleOutlined />}
+                            color={template.is_system_default || template.is_active ? 'success' : 'default'}
+                          >
+                            {template.is_system_default ? '始终启用' : (template.is_active ? '已启用' : '已禁用')}
                           </Tag>
                         </Space>
-                      </Space>
-                    </div>
 
-                    {/* 内容 */}
-                    <div style={{ padding: isMobile ? '16px' : '20px' }}>
-                      <Paragraph
-                        type="secondary"
-                        ellipsis={{ rows: 3 }}
-                        style={{ minHeight: 66, marginBottom: 16 }}
-                      >
-                        {template.description || '暂无描述'}
-                      </Paragraph>
+                        <Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 16 }}>
+                          模板键: {template.template_key}
+                        </Text>
 
-                      <Space wrap style={{ marginBottom: 16 }}>
-                        <Tag
-                          icon={<CheckCircleOutlined />}
-                          color={template.is_system_default || template.is_active ? 'success' : 'default'}
-                        >
-                          {template.is_system_default ? '始终启用' : (template.is_active ? '已启用' : '已禁用')}
-                        </Tag>
-                      </Space>
-
-                      <Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 16 }}>
-                        模板键: {template.template_key}
-                      </Text>
-
-                      {/* 操作按钮 */}
-                      <Space style={{ width: '100%', justifyContent: 'space-between' }}>
-                        <Button
-                          type="primary"
-                          icon={<EditOutlined />}
-                          onClick={() => handleEdit(template)}
-                          size={isMobile ? 'small' : 'middle'}
-                          style={{ borderRadius: 6 }}
-                        >
-                          编辑
-                        </Button>
-                        <Button
-                          icon={<ReloadOutlined />}
-                          onClick={() => handleReset(template.template_key)}
-                          size={isMobile ? 'small' : 'middle'}
-                          style={{ borderRadius: 6 }}
-                        >
-                          重置
-                        </Button>
-                      </Space>
-                    </div>
-                  </Card>
-                </Col>
-              ))}
-            </Row>
-          )}
-        </Spin>
+                        {/* 操作按钮 */}
+                        <Space style={{ width: '100%', justifyContent: 'space-between' }}>
+                          <Button
+                            type="primary"
+                            icon={<EditOutlined />}
+                            onClick={() => handleEdit(template)}
+                            size={isMobile ? 'small' : 'middle'}
+                            style={{ borderRadius: 6 }}
+                          >
+                            编辑
+                          </Button>
+                          <Button
+                            icon={<ReloadOutlined />}
+                            onClick={() => handleReset(template.template_key)}
+                            size={isMobile ? 'small' : 'middle'}
+                            style={{ borderRadius: 6 }}
+                          >
+                            重置
+                          </Button>
+                        </Space>
+                      </div>
+                    </Card>
+                  </Col>
+                ))}
+              </Row>
+            )}
+          </Spin>
+        </div>
       </div>
 
       {/* 编辑对话框 */}
@@ -486,6 +530,6 @@ export default function PromptTemplates() {
           />
         </Space>
       </Modal>
-    </div>
+    </div >
   );
 }

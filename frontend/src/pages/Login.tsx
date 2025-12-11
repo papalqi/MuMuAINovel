@@ -46,15 +46,15 @@ export default function Login() {
     try {
       setLoading(true);
       const response = await authApi.localLogin(values.username, values.password);
-      
+
       if (response.success) {
         message.success('登录成功！');
-        
+
         // 检查是否永久隐藏公告
         const hideForever = localStorage.getItem('announcement_hide_forever');
         const hideToday = localStorage.getItem('announcement_hide_today');
         const today = new Date().toDateString();
-        
+
         // 如果永久隐藏或今日已隐藏，则不显示公告
         if (hideForever === 'true' || hideToday === today) {
           const redirect = searchParams.get('redirect') || '/';
@@ -73,13 +73,13 @@ export default function Login() {
     try {
       setLoading(true);
       const response = await authApi.getLinuxDOAuthUrl();
-      
+
       // 保存重定向地址到 sessionStorage
       const redirect = searchParams.get('redirect');
       if (redirect) {
         sessionStorage.setItem('login_redirect', redirect);
       }
-      
+
       // 跳转到 LinuxDO 授权页面
       window.location.href = response.auth_url;
     } catch (error) {
@@ -96,9 +96,9 @@ export default function Login() {
         justifyContent: 'center',
         alignItems: 'center',
         minHeight: '100vh',
-        background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+        background: 'var(--color-bg-base)',
       }}>
-        <Spin size="large" style={{ color: '#fff' }} />
+        <Spin size="large" style={{ color: 'var(--color-primary)' }} />
       </div>
     );
   }
@@ -141,10 +141,10 @@ export default function Login() {
             height: 48,
             fontSize: 16,
             fontWeight: 600,
-            background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+            background: 'var(--color-primary)',
             border: 'none',
             borderRadius: '12px',
-            boxShadow: '0 4px 16px rgba(102, 126, 234, 0.4)',
+            boxShadow: 'var(--shadow-primary)',
           }}
         >
           登录
@@ -178,19 +178,19 @@ export default function Login() {
           height: 52,
           fontSize: 16,
           fontWeight: 600,
-          background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+          background: 'var(--color-primary)',
           border: 'none',
           borderRadius: '12px',
-          boxShadow: '0 4px 16px rgba(102, 126, 234, 0.4)',
+          boxShadow: 'var(--shadow-primary)',
           transition: 'all 0.3s ease',
         }}
         onMouseEnter={(e) => {
           e.currentTarget.style.transform = 'translateY(-2px)';
-          e.currentTarget.style.boxShadow = '0 6px 24px rgba(102, 126, 234, 0.5)';
+          e.currentTarget.style.boxShadow = 'var(--shadow-elevated)';
         }}
         onMouseLeave={(e) => {
           e.currentTarget.style.transform = 'translateY(0)';
-          e.currentTarget.style.boxShadow = '0 4px 16px rgba(102, 126, 234, 0.4)';
+          e.currentTarget.style.boxShadow = 'var(--shadow-primary)';
         }}
       >
         使用 LinuxDO 登录
@@ -224,144 +224,143 @@ export default function Login() {
         onNeverShow={handleNeverShow}
       />
       <div style={{
-      display: 'flex',
-      justifyContent: 'center',
-      alignItems: 'center',
-      minHeight: '100vh',
-      background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
-      padding: '20px',
-      position: 'relative',
-      overflow: 'hidden',
-    }}>
-      {/* 装饰性背景元素 */}
-      <div style={{
-        position: 'absolute',
-        top: '-10%',
-        right: '-5%',
-        width: '400px',
-        height: '400px',
-        background: 'rgba(255, 255, 255, 0.1)',
-        borderRadius: '50%',
-        filter: 'blur(60px)',
-      }} />
-      <div style={{
-        position: 'absolute',
-        bottom: '-10%',
-        left: '-5%',
-        width: '350px',
-        height: '350px',
-        background: 'rgba(255, 255, 255, 0.08)',
-        borderRadius: '50%',
-        filter: 'blur(60px)',
-      }} />
-      
-      <Card
-        style={{
-          width: '100%',
-          maxWidth: 420,
-          background: 'rgba(255, 255, 255, 0.95)',
-          backdropFilter: 'blur(20px)',
-          WebkitBackdropFilter: 'blur(20px)',
-          boxShadow: '0 20px 60px rgba(0, 0, 0, 0.3), 0 0 0 1px rgba(255, 255, 255, 0.2)',
-          border: '1px solid rgba(255, 255, 255, 0.3)',
-          borderRadius: '16px',
-          position: 'relative',
-          zIndex: 1,
-        }}
-        bodyStyle={{
-          padding: '40px 32px',
-        }}
-      >
-        <Space direction="vertical" size="large" style={{ width: '100%', textAlign: 'center' }}>
-          {/* Logo区域 */}
-          <div style={{ marginBottom: '8px' }}>
-            <div style={{
-              width: '72px',
-              height: '72px',
-              margin: '0 auto 20px',
-              background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
-              borderRadius: '20px',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              boxShadow: '0 8px 24px rgba(102, 126, 234, 0.4)',
-            }}>
-              <img
-                src="/logo.svg"
-                alt="Logo"
-                style={{
-                  width: '48px',
-                  height: '48px',
-                  filter: 'brightness(0) invert(1)',
-                }}
-              />
+        display: 'flex',
+        justifyContent: 'center',
+        alignItems: 'center',
+        minHeight: '100vh',
+        background: 'var(--color-bg-base)',
+        padding: '20px',
+        position: 'relative',
+        overflow: 'hidden',
+      }}>
+        {/* 装饰性背景元素 */}
+        <div style={{
+          position: 'absolute',
+          top: '-10%',
+          right: '-5%',
+          width: '400px',
+          height: '400px',
+          background: 'var(--color-primary)',
+          opacity: 0.1,
+          borderRadius: '50%',
+          filter: 'blur(60px)',
+        }} />
+        <div style={{
+          position: 'absolute',
+          bottom: '-10%',
+          left: '-5%',
+          width: '350px',
+          height: '350px',
+          background: 'var(--color-success)',
+          opacity: 0.08,
+          borderRadius: '50%',
+          filter: 'blur(60px)',
+        }} />
+
+        <Card
+          style={{
+            width: '100%',
+            maxWidth: 420,
+            background: 'var(--color-bg-container)',
+            backdropFilter: 'blur(20px)',
+            WebkitBackdropFilter: 'blur(20px)',
+            boxShadow: 'var(--shadow-card)',
+            border: '1px solid var(--color-border)',
+            borderRadius: '16px',
+            position: 'relative',
+            zIndex: 1,
+          }}
+          bodyStyle={{
+            padding: '40px 32px',
+          }}
+        >
+          <Space direction="vertical" size="large" style={{ width: '100%', textAlign: 'center' }}>
+            {/* Logo区域 */}
+            <div style={{ marginBottom: '8px' }}>
+              <div style={{
+                width: '72px',
+                height: '72px',
+                margin: '0 auto 20px',
+                background: 'var(--color-primary)',
+                borderRadius: '20px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                boxShadow: 'var(--shadow-primary)',
+              }}>
+                <img
+                  src="/logo.svg"
+                  alt="Logo"
+                  style={{
+                    width: '48px',
+                    height: '48px',
+                    filter: 'brightness(0) invert(1)',
+                  }}
+                />
+              </div>
+              <Title level={2} style={{
+                marginBottom: 8,
+                color: 'var(--color-primary)',
+                fontWeight: 700,
+              }}>
+                AI小说创作助手
+              </Title>
+              <Paragraph style={{
+                color: 'var(--color-text-secondary)',
+                fontSize: '14px',
+                marginBottom: 0,
+              }}>
+                {localAuthEnabled && linuxdoEnabled ? '选择登录方式' :
+                  localAuthEnabled ? '使用账户密码登录' :
+                    '使用 LinuxDO 账号登录'}
+              </Paragraph>
             </div>
-            <Title level={2} style={{
-              marginBottom: 8,
-              background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
-              WebkitBackgroundClip: 'text',
-              WebkitTextFillColor: 'transparent',
-              backgroundClip: 'text',
-              fontWeight: 700,
-            }}>
-              AI小说创作助手
-            </Title>
-            <Paragraph style={{
-              color: '#666',
-              fontSize: '14px',
-              marginBottom: 0,
-            }}>
-              {localAuthEnabled && linuxdoEnabled ? '选择登录方式' :
-               localAuthEnabled ? '使用账户密码登录' :
-               '使用 LinuxDO 账号登录'}
-            </Paragraph>
-          </div>
 
-          {/* 登录方式 */}
-          {localAuthEnabled && linuxdoEnabled ? (
-            <Tabs
-              defaultActiveKey="local"
-              centered
-              items={[
-                {
-                  key: 'local',
-                  label: '账户密码',
-                  children: renderLocalLogin(),
-                },
-                {
-                  key: 'linuxdo',
-                  label: 'LinuxDO',
-                  children: renderLinuxDOLogin(),
-                },
-              ]}
-            />
-          ) : localAuthEnabled ? (
-            renderLocalLogin()
-          ) : (
-            renderLinuxDOLogin()
-          )}
+            {/* 登录方式 */}
+            {localAuthEnabled && linuxdoEnabled ? (
+              <Tabs
+                defaultActiveKey="local"
+                centered
+                items={[
+                  {
+                    key: 'local',
+                    label: '账户密码',
+                    children: renderLocalLogin(),
+                  },
+                  {
+                    key: 'linuxdo',
+                    label: 'LinuxDO',
+                    children: renderLinuxDOLogin(),
+                  },
+                ]}
+              />
+            ) : localAuthEnabled ? (
+              renderLocalLogin()
+            ) : (
+              renderLinuxDOLogin()
+            )}
 
-          {/* 提示信息 */}
-          <div style={{
-            padding: '16px',
-            background: 'rgba(102, 126, 234, 0.08)',
-            borderRadius: '12px',
-            border: '1px solid rgba(102, 126, 234, 0.1)',
-          }}>
-            <Paragraph style={{
-              fontSize: 13,
-              color: '#666',
-              marginBottom: 0,
-              lineHeight: 1.6,
+            {/* 提示信息 */}
+            <div style={{
+              padding: '16px',
+              background: 'rgba(77, 128, 136, 0.08)',
+              borderRadius: '12px',
+              border: '1px solid var(--color-border)',
             }}>
-              🎉 首次登录将自动创建账号
-              <br />
-              🔒 每个用户拥有独立的数据空间
-            </Paragraph>
-          </div>
-        </Space>
-      </Card>
-    </div>
+              <Paragraph style={{
+                fontSize: 13,
+                color: 'var(--color-text-secondary)',
+                marginBottom: 0,
+                lineHeight: 1.6,
+              }}>
+                🎉 首次登录将自动创建账号
+                <br />
+                🔒 每个用户拥有独立的数据空间
+              </Paragraph>
+            </div>
+          </Space>
+        </Card>
+      </div>
     </>
   );
 }

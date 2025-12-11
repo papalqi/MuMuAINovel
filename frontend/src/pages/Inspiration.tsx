@@ -45,6 +45,16 @@ const CACHE_EXPIRY = 24 * 60 * 60 * 1000;
 const Inspiration: React.FC = () => {
   const navigate = useNavigate();
   const [currentStep, setCurrentStep] = useState<Step>('idea');
+  const [isMobile, setIsMobile] = useState(window.innerWidth <= 768);
+
+  useEffect(() => {
+    const handleResize = () => {
+      setIsMobile(window.innerWidth <= 768);
+    };
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
+
   const [messages, setMessages] = useState<Message[]>([
     {
       type: 'ai',
@@ -54,15 +64,15 @@ const Inspiration: React.FC = () => {
   const [inputValue, setInputValue] = useState('');
   const [loading, setLoading] = useState(false);
   const [selectedOptions, setSelectedOptions] = useState<string[]>([]);
-  
+
   // 收集的数据
   const [wizardData, setWizardData] = useState<Partial<WizardData>>({});
   // 保存用户的原始想法，用于保持上下文一致性
   const [initialIdea, setInitialIdea] = useState<string>('');
-  
+
   // 生成配置
   const [generationConfig, setGenerationConfig] = useState<GenerationConfig | null>(null);
-  
+
   // 滚动容器引用
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const chatContainerRef = useRef<HTMLDivElement>(null);
@@ -77,7 +87,7 @@ const Inspiration: React.FC = () => {
   const [cacheLoaded, setCacheLoaded] = useState(false);
 
   // ==================== 缓存管理函数 ====================
-  
+
   // 保存到缓存
   const saveToCache = () => {
     try {
@@ -85,7 +95,7 @@ const Inspiration: React.FC = () => {
       if (currentStep === 'generating' || currentStep === 'complete') {
         return;
       }
-      
+
       // 只有用户有输入时才保存（至少两条消息：AI问候+用户回复）
       if (messages.length <= 1) {
         return;
@@ -99,7 +109,7 @@ const Inspiration: React.FC = () => {
         selectedOptions,
         timestamp: Date.now()
       };
-      
+
       localStorage.setItem(CACHE_KEY, JSON.stringify(cacheData));
       console.log('💾 对话已自动保存');
     } catch (error) {
@@ -158,7 +168,7 @@ const Inspiration: React.FC = () => {
   };
 
   // ==================== 组件挂载时恢复缓存 ====================
-  
+
   useEffect(() => {
     if (!cacheLoaded) {
       restoreFromCache();
@@ -167,7 +177,7 @@ const Inspiration: React.FC = () => {
   }, []);
 
   // ==================== 自动保存：状态变化时保存 ====================
-  
+
   useEffect(() => {
     // 防抖保存
     const timer = setTimeout(() => {
@@ -199,7 +209,7 @@ const Inspiration: React.FC = () => {
   // 重试生成
   const handleRetry = async () => {
     if (!lastFailedRequest) return;
-    
+
     setLoading(true);
     try {
       const response = await inspirationApi.generateOptions({
@@ -215,8 +225,8 @@ const Inspiration: React.FC = () => {
       setMessages(prev => {
         const newMessages = [...prev];
         if (newMessages[newMessages.length - 1].type === 'ai' &&
-            (newMessages[newMessages.length - 1].content.includes('生成失败') ||
-             newMessages[newMessages.length - 1].content.includes('出错了'))) {
+          (newMessages[newMessages.length - 1].content.includes('生成失败') ||
+            newMessages[newMessages.length - 1].content.includes('出错了'))) {
           newMessages.pop();
         }
         return newMessages;
@@ -252,7 +262,7 @@ const Inspiration: React.FC = () => {
       content: inputValue,
     };
     setMessages(prev => [...prev, userMessage]);
-    
+
     const userInput = inputValue;
     setInputValue('');
     setLoading(true);
@@ -260,7 +270,7 @@ const Inspiration: React.FC = () => {
     try {
       if (currentStep === 'idea') {
         setInitialIdea(userInput);
-        
+
         const requestData = {
           step: 'title' as const,
           context: {
@@ -268,7 +278,7 @@ const Inspiration: React.FC = () => {
             description: userInput
           }
         };
-        
+
         const response = await inspirationApi.generateOptions(requestData);
 
         if (response.error || !response.options || response.options.length < 3) {
@@ -308,12 +318,12 @@ const Inspiration: React.FC = () => {
       await handleRetry();
       return;
     }
-    
+
     if (option === '我自己输入书名' || option === '我自己输入') {
       message.info('请在下方输入框中输入您的内容');
       return;
     }
-    
+
     // 对于多选类型，不立即禁用选项
     if (currentStep === 'genre') {
       const newSelected = selectedOptions.includes(option)
@@ -322,7 +332,7 @@ const Inspiration: React.FC = () => {
       setSelectedOptions(newSelected);
       return;
     }
-    
+
     // 立即禁用当前消息的选项（单选场景）
     setMessages(prev => {
       const newMessages = [...prev];
@@ -335,17 +345,17 @@ const Inspiration: React.FC = () => {
       }
       return newMessages;
     });
-    
+
     if (currentStep === 'perspective') {
       const userMessage: Message = {
         type: 'user',
         content: option,
       };
       setMessages(prev => [...prev, userMessage]);
-      
+
       const updatedData = { ...wizardData, narrative_perspective: option };
       setWizardData(updatedData);
-      
+
       // 询问大纲模式
       const aiMessage: Message = {
         type: 'ai',
@@ -362,25 +372,25 @@ const Inspiration: React.FC = () => {
       setCurrentStep('outline_mode');
       return;
     }
-    
+
     if (currentStep === 'outline_mode') {
       const userMessage: Message = {
         type: 'user',
         content: option,
       };
       setMessages(prev => [...prev, userMessage]);
-      
+
       // 将选项转换为实际的模式值
       const modeValue: 'one-to-one' | 'one-to-many' =
         option === '📋 一对一模式' ? 'one-to-one' : 'one-to-many';
-      
+
       const updatedData = {
         ...wizardData,
         outline_mode: modeValue,
         genre: wizardData.genre || []
       } as WizardData;
       setWizardData(updatedData);
-      
+
       // 显示摘要
       const modeText = modeValue === 'one-to-one' ? '一对一模式' : '一对多模式';
       const summary = `
@@ -405,7 +415,7 @@ const Inspiration: React.FC = () => {
       setCurrentStep('confirm');
       return;
     }
-    
+
     if (currentStep === 'confirm') {
       if (option === '✅ 确认创建') {
         const userMessage: Message = {
@@ -413,16 +423,16 @@ const Inspiration: React.FC = () => {
           content: '确认创建',
         };
         setMessages(prev => [...prev, userMessage]);
-        
+
         const aiMessage: Message = {
           type: 'ai',
           content: '好的！正在为你创建项目，这可能需要几分钟时间...'
         };
         setMessages(prev => [...prev, aiMessage]);
-        
+
         // 清除缓存（对话完成，进入生成阶段）
         clearCache();
-        
+
         // 开始生成项目
         const data = wizardData as WizardData;
         const config: GenerationConfig = {
@@ -476,7 +486,7 @@ const Inspiration: React.FC = () => {
     setLoading(true);
     try {
       const updatedData = { ...wizardData };
-      
+
       if (currentStep === 'title') {
         updatedData.title = input;
       } else if (currentStep === 'description') {
@@ -493,7 +503,7 @@ const Inspiration: React.FC = () => {
         setLoading(false);
         return;
       }
-      
+
       setWizardData(updatedData);
       await generateNextStep(updatedData);
     } catch (error: any) {
@@ -532,7 +542,7 @@ const Inspiration: React.FC = () => {
     const updatedData = { ...wizardData, genre: selectedOptions };
     setWizardData(updatedData);
     setSelectedOptions([]);
-    
+
     setLoading(true);
     try {
       const aiMessage: Message = {
@@ -657,7 +667,7 @@ const Inspiration: React.FC = () => {
   const handleRestart = () => {
     // 清除缓存
     clearCache();
-    
+
     setCurrentStep('idea');
     setMessages([
       {
@@ -697,7 +707,7 @@ const Inspiration: React.FC = () => {
       <Card
         ref={chatContainerRef}
         style={{
-          height: window.innerWidth <= 768 ? 'calc(100vh - 280px)' : 600,
+          height: isMobile ? 'calc(100vh - 280px)' : 600,
           overflowY: 'auto',
           marginBottom: 16,
           boxShadow: '0 8px 24px rgba(0,0,0,0.15)',
@@ -721,22 +731,22 @@ const Inspiration: React.FC = () => {
                 maxWidth: '80%',
                 padding: '12px 16px',
                 borderRadius: 12,
-                background: msg.type === 'ai' ? '#f0f0f0' : '#1890ff',
-                color: msg.type === 'ai' ? '#000' : '#fff',
+                background: msg.type === 'ai' ? 'var(--color-bg-container)' : 'var(--color-primary)',
+                color: msg.type === 'ai' ? 'var(--color-text-primary)' : '#fff',
                 boxShadow: msg.type === 'ai'
-                  ? '0 2px 8px rgba(0,0,0,0.08)'
-                  : '0 2px 8px rgba(24,144,255,0.3)',
+                  ? 'var(--shadow-card)'
+                  : 'var(--shadow-primary)',
               }}>
-                <Paragraph 
-                  style={{ 
-                    margin: 0, 
-                    color: msg.type === 'ai' ? '#000' : '#fff',
+                <Paragraph
+                  style={{
+                    margin: 0,
+                    color: msg.type === 'ai' ? 'var(--color-text-primary)' : '#fff',
                     whiteSpace: 'pre-wrap'
                   }}
                 >
                   {msg.content}
                 </Paragraph>
-                
+
                 {msg.options && msg.options.length > 0 && (
                   <Space
                     direction="vertical"
@@ -752,13 +762,13 @@ const Inspiration: React.FC = () => {
                         style={{
                           cursor: msg.optionsDisabled ? 'not-allowed' : 'pointer',
                           border: msg.isMultiSelect && selectedOptions.includes(option)
-                            ? '2px solid #1890ff'
-                            : '1px solid #d9d9d9',
+                            ? '2px solid var(--color-primary)'
+                            : '1px solid var(--color-border)',
                           background: msg.optionsDisabled
-                            ? '#f5f5f5'
+                            ? 'var(--color-bg-layout)'
                             : msg.isMultiSelect && selectedOptions.includes(option)
-                            ? '#e6f7ff'
-                            : '#fff',
+                              ? 'var(--color-bg-spotlight)' // Need to ensure this exists or use safe fallback
+                              : 'var(--color-bg-container)',
                           opacity: msg.optionsDisabled ? 0.6 : 1,
                           animation: 'floatIn 0.6s ease-out',
                           animationDelay: `${optIndex * 0.1}s`,
@@ -768,7 +778,7 @@ const Inspiration: React.FC = () => {
                         onMouseEnter={(e) => {
                           if (!msg.optionsDisabled) {
                             e.currentTarget.style.transform = 'translateY(-2px) scale(1.02)';
-                            e.currentTarget.style.boxShadow = '0 4px 12px rgba(24,144,255,0.2)';
+                            e.currentTarget.style.boxShadow = 'var(--shadow-elevated)';
                           }
                         }}
                         onMouseLeave={(e) => {
@@ -781,7 +791,7 @@ const Inspiration: React.FC = () => {
                         {option}
                       </Card>
                     ))}
-                    
+
                     {msg.isMultiSelect && (
                       <Button
                         type="primary"
@@ -797,7 +807,7 @@ const Inspiration: React.FC = () => {
               </div>
             </div>
           ))}
-          
+
           {loading && (
             <div style={{
               textAlign: 'center',
@@ -807,7 +817,7 @@ const Inspiration: React.FC = () => {
               <Spin tip="AI思考中..." />
             </div>
           )}
-          
+
           <div ref={messagesEndRef} />
         </Space>
       </Card>
@@ -821,7 +831,7 @@ const Inspiration: React.FC = () => {
             value={inputValue}
             onChange={(e) => setInputValue(e.target.value)}
             placeholder={
-              currentStep === 'idea' 
+              currentStep === 'idea'
                 ? '例如：我想写一本关于时间旅行的科幻小说...'
                 : '输入自定义内容，或点击上方选项卡片...'
             }
@@ -854,8 +864,7 @@ const Inspiration: React.FC = () => {
   return (
     <div style={{
       minHeight: '100vh',
-      background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
-      padding: window.innerWidth <= 768 ? '12px' : '24px'
+      background: 'var(--color-bg-base)',
     }}>
       <style>
         {`
@@ -894,53 +903,65 @@ const Inspiration: React.FC = () => {
           }
         `}
       </style>
-      <div style={{ maxWidth: 800, margin: '0 auto' }}>
+
+      {/* 顶部标题栏 - 固定不滚动 */}
+      <div style={{
+        position: 'sticky',
+        top: 0,
+        zIndex: 100,
+        background: 'var(--color-primary)',
+        boxShadow: 'var(--shadow-header)',
+      }}>
         <div style={{
-          marginBottom: window.innerWidth <= 768 ? 12 : 24,
-          position: 'relative'
+          maxWidth: 1200,
+          margin: '0 auto',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          padding: isMobile ? '12px 16px' : '16px 24px',
         }}>
           <Button
             icon={<ArrowLeftOutlined />}
             onClick={handleBack}
-            type="text"
-            size={window.innerWidth <= 768 ? 'small' : 'middle'}
+            size={isMobile ? 'middle' : 'large'}
             style={{
+              background: 'rgba(255,255,255,0.2)',
+              borderColor: 'rgba(255,255,255,0.3)',
               color: '#fff',
-              padding: window.innerWidth <= 768 ? '4px 8px' : '4px 15px',
-              height: window.innerWidth <= 768 ? 32 : 'auto',
-              position: window.innerWidth <= 768 ? 'absolute' : 'static',
-              left: 0,
-              top: 0,
-              zIndex: 1
             }}
           >
-            {window.innerWidth <= 768 ? '返回' : '返回项目列表'}
+            {isMobile ? '返回' : '返回项目列表'}
           </Button>
-          <div style={{
-            textAlign: 'center',
-            paddingTop: window.innerWidth <= 768 ? 0 : 0
-          }}>
+
+          <div style={{ textAlign: 'center' }}>
             <Title
-              level={window.innerWidth <= 768 ? 4 : 2}
+              level={isMobile ? 4 : 2}
               style={{
-                color: '#fff',
                 margin: 0,
-                marginBottom: window.innerWidth <= 768 ? 4 : 8
+                color: '#fff',
+                textShadow: '0 2px 4px rgba(0,0,0,0.1)',
+                lineHeight: 1.2
               }}
             >
               ✨ 灵感模式
             </Title>
             <Text style={{
-              color: '#fff',
-              display: 'block',
-              fontSize: window.innerWidth <= 768 ? 12 : 14,
-              opacity: 0.9
+              color: 'rgba(255,255,255,0.85)',
+              fontSize: isMobile ? 12 : 14,
             }}>
               通过对话快速创建你的小说项目
             </Text>
           </div>
-        </div>
 
+          <div style={{ width: isMobile ? 60 : 120 }}></div>
+        </div>
+      </div>
+
+      <div style={{
+        maxWidth: 800,
+        margin: '0 auto',
+        padding: isMobile ? '16px 12px' : '24px 24px',
+      }}>
         {(currentStep === 'idea' || currentStep === 'title' || currentStep === 'description' ||
           currentStep === 'theme' || currentStep === 'genre' || currentStep === 'perspective' ||
           currentStep === 'outline_mode' || currentStep === 'confirm') && renderChat()}
@@ -950,7 +971,7 @@ const Inspiration: React.FC = () => {
             storagePrefix="inspiration"
             onComplete={handleComplete}
             onBack={handleBackToChat}
-            isMobile={window.innerWidth <= 768}
+            isMobile={isMobile}
           />
         )}
       </div>
@@ -959,4 +980,3 @@ const Inspiration: React.FC = () => {
 };
 
 export default Inspiration;
-          

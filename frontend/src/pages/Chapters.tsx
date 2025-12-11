@@ -15,6 +15,7 @@ const { TextArea } = Input;
 
 export default function Chapters() {
   const { currentProject, chapters, setCurrentChapter, setCurrentProject } = useStore();
+  const [modal, contextHolder] = Modal.useModal();
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isEditorOpen, setIsEditorOpen] = useState(false);
   const [isContinuing, setIsContinuing] = useState(false);
@@ -433,7 +434,7 @@ export default function Chapters() {
 
     const selectedStyle = writingStyles.find(s => s.id === selectedStyleId);
 
-    const modal = Modal.confirm({
+    const instance = modal.confirm({
       title: 'AI创作章节内容',
       width: 700,
       centered: true,
@@ -455,11 +456,11 @@ export default function Chapters() {
             <div style={{
               marginTop: 16,
               padding: 12,
-              background: '#f0f5ff',
+              background: 'var(--color-info-bg)',
               borderRadius: 4,
-              border: '1px solid #adc6ff'
+              border: '1px solid var(--color-info-border)'
             }}>
-              <div style={{ marginBottom: 8, fontWeight: 500, color: '#1890ff' }}>
+              <div style={{ marginBottom: 8, fontWeight: 500, color: 'var(--color-primary)' }}>
                 📚 将引用的前置章节（共{previousChapters.length}章）：
               </div>
               <div style={{ maxHeight: 150, overflowY: 'auto' }}>
@@ -484,7 +485,7 @@ export default function Chapters() {
       okButtonProps: { danger: true },
       cancelText: '取消',
       onOk: async () => {
-        modal.update({
+        instance.update({
           okButtonProps: { danger: true, loading: true },
           cancelButtonProps: { disabled: true },
           closable: false,
@@ -495,7 +496,7 @@ export default function Chapters() {
         try {
           if (!selectedStyleId) {
             message.error('请先选择写作风格');
-            modal.update({
+            instance.update({
               okButtonProps: { danger: true, loading: false },
               cancelButtonProps: { disabled: false },
               closable: true,
@@ -505,9 +506,9 @@ export default function Chapters() {
             return;
           }
           await handleGenerate();
-          modal.destroy();
+          instance.destroy();
         } catch (error) {
-          modal.update({
+          instance.update({
             okButtonProps: { danger: true, loading: false },
             cancelButtonProps: { disabled: false },
             closable: true,
@@ -579,7 +580,7 @@ export default function Chapters() {
       return;
     }
 
-    Modal.confirm({
+    modal.confirm({
       title: '导出项目章节',
       content: `确定要将《${currentProject.title}》的所有章节导出为TXT文件吗？`,
       centered: true,
@@ -840,7 +841,7 @@ export default function Chapters() {
       ? Math.max(...chapters.map(c => c.chapter_number)) + 1
       : 1;
 
-    Modal.confirm({
+    modal.confirm({
       title: '手动创建章节',
       width: 600,
       centered: true,
@@ -937,7 +938,7 @@ export default function Chapters() {
 
         if (conflictChapter) {
           // 显示冲突提示Modal
-          Modal.confirm({
+          modal.confirm({
             title: '章节序号冲突',
             icon: <InfoCircleOutlined style={{ color: '#ff4d4f' }} />,
             width: 500,
@@ -1074,10 +1075,10 @@ export default function Chapters() {
     try {
       const planData: ExpansionPlanData = JSON.parse(chapter.expansion_plan);
 
-      Modal.info({
+      modal.info({
         title: (
           <Space style={{ flexWrap: 'wrap' }}>
-            <InfoCircleOutlined style={{ color: '#1890ff' }} />
+            <InfoCircleOutlined style={{ color: 'var(--color-primary)' }} />
             <span style={{ wordBreak: 'break-word' }}>第{chapter.chapter_number}章展开规划</span>
           </Space>
         ),
@@ -1366,11 +1367,12 @@ export default function Chapters() {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+      {contextHolder}
       <div style={{
         position: 'sticky',
         top: 0,
         zIndex: 10,
-        backgroundColor: '#fff',
+        backgroundColor: 'var(--color-bg-container)',
         padding: isMobile ? '12px 0' : '16px 0',
         marginBottom: isMobile ? 12 : 16,
         borderBottom: '1px solid #f0f0f0',
@@ -1486,7 +1488,7 @@ export default function Chapters() {
               >
                 <div style={{ width: '100%' }}>
                   <List.Item.Meta
-                    avatar={!isMobile && <FileTextOutlined style={{ fontSize: 32, color: '#1890ff' }} />}
+                    avatar={!isMobile && <FileTextOutlined style={{ fontSize: 32, color: 'var(--color-primary)' }} />}
                     title={
                       <div style={{
                         display: 'flex',
@@ -1500,7 +1502,7 @@ export default function Chapters() {
                         </span>
                         <Space wrap size={isMobile ? 4 : 8}>
                           <Tag color={getStatusColor(item.status)}>{getStatusText(item.status)}</Tag>
-                          <Badge count={`${item.word_count || 0}字`} style={{ backgroundColor: '#52c41a' }} />
+                          <Badge count={`${item.word_count || 0}字`} style={{ backgroundColor: 'var(--color-success)' }} />
                           {renderAnalysisStatus(item.id)}
                           {!canGenerateChapter(item) && (
                             <Tooltip title={getGenerateDisabledReason(item)}>
@@ -1591,11 +1593,11 @@ export default function Chapters() {
                     </span>
                     <Badge
                       count={`${group.chapters.length} 章`}
-                      style={{ backgroundColor: '#52c41a' }}
+                      style={{ backgroundColor: 'var(--color-success)' }}
                     />
                     <Badge
                       count={`${group.chapters.reduce((sum, ch) => sum + (ch.word_count || 0), 0)} 字`}
-                      style={{ backgroundColor: '#1890ff' }}
+                      style={{ backgroundColor: 'var(--color-primary)' }}
                     />
                   </div>
                 }
@@ -1681,7 +1683,7 @@ export default function Chapters() {
                     >
                       <div style={{ width: '100%' }}>
                         <List.Item.Meta
-                          avatar={!isMobile && <FileTextOutlined style={{ fontSize: 32, color: '#1890ff' }} />}
+                          avatar={!isMobile && <FileTextOutlined style={{ fontSize: 32, color: 'var(--color-primary)' }} />}
                           title={
                             <div style={{
                               display: 'flex',
@@ -1695,7 +1697,7 @@ export default function Chapters() {
                               </span>
                               <Space wrap size={isMobile ? 4 : 8}>
                                 <Tag color={getStatusColor(item.status)}>{getStatusText(item.status)}</Tag>
-                                <Badge count={`${item.word_count || 0}字`} style={{ backgroundColor: '#52c41a' }} />
+                                <Badge count={`${item.word_count || 0}字`} style={{ backgroundColor: 'var(--color-success)' }} />
                                 {renderAnalysisStatus(item.id)}
                                 {!canGenerateChapter(item) && (
                                   <Tooltip title={getGenerateDisabledReason(item)}>
@@ -1708,7 +1710,7 @@ export default function Chapters() {
                                   {item.expansion_plan && (
                                     <Tooltip title="查看展开详情">
                                       <InfoCircleOutlined
-                                        style={{ color: '#1890ff', cursor: 'pointer', fontSize: 16 }}
+                                        style={{ color: 'var(--color-primary)', cursor: 'pointer', fontSize: 16 }}
                                         onClick={(e) => {
                                           e.stopPropagation();
                                           showExpansionPlanModal(item);
@@ -1718,7 +1720,7 @@ export default function Chapters() {
                                   )}
                                   <Tooltip title={item.expansion_plan ? "编辑规划信息" : "创建规划信息"}>
                                     <FormOutlined
-                                      style={{ color: '#52c41a', cursor: 'pointer', fontSize: 16 }}
+                                      style={{ color: 'var(--color-success)', cursor: 'pointer', fontSize: 16 }}
                                       onClick={(e) => {
                                         e.stopPropagation();
                                         handleOpenPlanEditor(item);
@@ -1992,7 +1994,7 @@ export default function Chapters() {
                 <Select.Option value="omniscient">全知视角</Select.Option>
               </Select>
               {temporaryNarrativePerspective && (
-                <div style={{ color: '#52c41a', fontSize: 12, marginTop: 4 }}>
+                <div style={{ color: 'var(--color-success)', fontSize: 12, marginTop: 4 }}>
                   ✓ {getNarrativePerspectiveText(temporaryNarrativePerspective)}
                 </div>
               )}
@@ -2169,7 +2171,7 @@ export default function Chapters() {
         open={batchGenerateVisible}
         onCancel={() => {
           if (batchGenerating) {
-            Modal.confirm({
+            modal.confirm({
               title: '确认取消',
               content: '批量生成正在进行中，确定要取消吗？',
               okText: '确定取消',
@@ -2374,7 +2376,7 @@ export default function Chapters() {
                 danger
                 icon={<StopOutlined />}
                 onClick={() => {
-                  Modal.confirm({
+                  modal.confirm({
                     title: '确认取消',
                     content: '确定要取消批量生成吗？已生成的章节将保留。',
                     okText: '确定取消',
@@ -2409,7 +2411,7 @@ export default function Chapters() {
         }
         title="批量生成章节"
         onCancel={() => {
-          Modal.confirm({
+          modal.confirm({
             title: '确认取消',
             content: '确定要取消批量生成吗？已生成的章节将保留。',
             okText: '确定取消',

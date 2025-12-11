@@ -40,6 +40,7 @@ export default function Characters() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentProject?.id]);
+  const [modal, contextHolder] = Modal.useModal();
 
   if (!currentProject) return null;
 
@@ -200,7 +201,7 @@ export default function Characters() {
 
   const handleUpdateCharacter = async (values: CharacterUpdate) => {
     if (!editingCharacter) return;
-    
+
     try {
       await characterApi.updateCharacter(editingCharacter.id, values);
       message.success('更新成功');
@@ -218,7 +219,7 @@ export default function Characters() {
   };
 
   const showGenerateModal = () => {
-    Modal.confirm({
+    modal.confirm({
       title: 'AI生成角色',
       width: 600,
       centered: true,
@@ -256,7 +257,7 @@ export default function Characters() {
   };
 
   const showGenerateOrgModal = () => {
-    Modal.confirm({
+    modal.confirm({
       title: 'AI生成组织',
       width: 600,
       centered: true,
@@ -306,14 +307,15 @@ export default function Characters() {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+      {contextHolder}
       <div style={{
         position: 'sticky',
         top: 0,
         zIndex: 10,
-        backgroundColor: '#fff',
+        backgroundColor: 'var(--color-bg-container)',
         padding: isMobile ? '12px 0' : '16px 0',
         marginBottom: isMobile ? 12 : 16,
-        borderBottom: '1px solid #f0f0f0',
+        borderBottom: '1px solid var(--color-border-secondary)',
         display: 'flex',
         flexDirection: isMobile ? 'column' : 'row',
         gap: isMobile ? 12 : 0,
@@ -370,45 +372,45 @@ export default function Characters() {
           position: 'sticky',
           top: isMobile ? 60 : 72,
           zIndex: 9,
-          backgroundColor: '#fff',
+          backgroundColor: 'var(--color-bg-container)',
           paddingBottom: 8,
-          borderBottom: '1px solid #f0f0f0',
+          borderBottom: '1px solid var(--color-border-secondary)',
         }}>
           <Tabs
             activeKey={activeTab}
             onChange={(key) => setActiveTab(key as 'all' | 'character' | 'organization')}
             items={[
-                {
-                  key: 'all',
-                  label: `全部 (${characters.length})`,
-                },
-                {
-                  key: 'character',
-                  label: (
-                    <span>
-                      <UserOutlined /> 角色 ({characterList.length})
-                    </span>
-                  ),
-                },
-                {
-                  key: 'organization',
-                  label: (
-                    <span>
-                      <TeamOutlined /> 组织 ({organizationList.length})
-                    </span>
-                  ),
-                },
-              ]}
-            />
-          </div>
-        )}
-  
-        <div style={{ flex: 1, overflowY: 'auto' }}>
-          {characters.length === 0 ? (
-            <Empty description="还没有角色或组织，开始创建吧！" />
-          ) : (
-            <>
-              <Row gutter={isMobile ? [8, 8] : characterGridConfig.gutter}>
+              {
+                key: 'all',
+                label: `全部 (${characters.length})`,
+              },
+              {
+                key: 'character',
+                label: (
+                  <span>
+                    <UserOutlined /> 角色 ({characterList.length})
+                  </span>
+                ),
+              },
+              {
+                key: 'organization',
+                label: (
+                  <span>
+                    <TeamOutlined /> 组织 ({organizationList.length})
+                  </span>
+                ),
+              },
+            ]}
+          />
+        </div>
+      )}
+
+      <div style={{ flex: 1, overflowY: 'auto' }}>
+        {characters.length === 0 ? (
+          <Empty description="还没有角色或组织，开始创建吧！" />
+        ) : (
+          <>
+            <Row gutter={isMobile ? [8, 8] : characterGridConfig.gutter}>
               {activeTab === 'all' && (
                 <>
                   {characterList.length > 0 && (
@@ -440,7 +442,7 @@ export default function Characters() {
                       ))}
                     </>
                   )}
-                  
+
                   {organizationList.length > 0 && (
                     <>
                       <Col span={24}>
@@ -472,7 +474,7 @@ export default function Characters() {
                   )}
                 </>
               )}
-              
+
               {activeTab === 'character' && characterList.map((character) => (
                 <Col
                   xs={24}
@@ -490,7 +492,7 @@ export default function Characters() {
                   />
                 </Col>
               ))}
-              
+
               {activeTab === 'organization' && organizationList.map((org) => (
                 <Col
                   xs={24}
@@ -511,14 +513,14 @@ export default function Characters() {
             </Row>
 
             {displayList.length === 0 && (
-              <Empty 
+              <Empty
                 description={
-                  activeTab === 'character' 
-                    ? '暂无角色' 
-                    : activeTab === 'organization' 
-                    ? '暂无组织' 
-                    : '暂无数据'
-                } 
+                  activeTab === 'character'
+                    ? '暂无角色'
+                    : activeTab === 'organization'
+                      ? '暂无组织'
+                      : '暂无数据'
+                }
               />
             )}
           </>
@@ -550,7 +552,7 @@ export default function Characters() {
                 <Input placeholder={`输入${editingCharacter?.is_organization ? '组织' : '角色'}名称`} />
               </Form.Item>
             </Col>
-            
+
             {!editingCharacter?.is_organization && (
               <Col span={12}>
                 <Form.Item label="角色定位" name="role_type">
@@ -615,7 +617,7 @@ export default function Characters() {
                   </Form.Item>
                 </Col>
               </Row>
-              
+
               <Form.Item
                 label="组织目的"
                 name="organization_purpose"
@@ -689,7 +691,7 @@ export default function Characters() {
                 <Input placeholder={`输入${createType === 'character' ? '角色' : '组织'}名称`} />
               </Form.Item>
             </Col>
-            
+
             {createType === 'character' && (
               <Col span={12}>
                 <Form.Item label="角色定位" name="role_type" initialValue="supporting">
@@ -761,7 +763,7 @@ export default function Characters() {
                   </Form.Item>
                 </Col>
               </Row>
-              
+
               <Form.Item
                 label="组织目的"
                 name="organization_purpose"

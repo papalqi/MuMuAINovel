@@ -51,10 +51,10 @@ const ChapterContentComparison: React.FC<ChapterContentComparisonProps> = ({
       }
 
       message.success('新内容已应用！');
-      
+
       // 先调用 onApply 通知父组件刷新
       onApply();
-      
+
       // 延迟触发章节分析，给父组件时间刷新
       setTimeout(async () => {
         try {
@@ -75,7 +75,7 @@ const ChapterContentComparison: React.FC<ChapterContentComparisonProps> = ({
           message.warning('章节分析触发失败，您可以手动触发分析');
         }
       }, 500);
-      
+
       onClose();
     } catch (error: any) {
       message.error(error.message || '应用失败');
@@ -108,9 +108,9 @@ const ChapterContentComparison: React.FC<ChapterContentComparisonProps> = ({
       centered
       style={{ maxWidth: 1600 }}
       footer={[
-        <Button 
-          key="discard" 
-          danger 
+        <Button
+          key="discard"
+          danger
           icon={<CloseOutlined />}
           onClick={handleDiscard}
         >
@@ -123,9 +123,9 @@ const ChapterContentComparison: React.FC<ChapterContentComparisonProps> = ({
         >
           切换视图
         </Button>,
-        <Button 
-          key="apply" 
-          type="primary" 
+        <Button
+          key="apply"
+          type="primary"
           icon={<CheckOutlined />}
           loading={applying}
           onClick={handleApply}
@@ -156,7 +156,7 @@ const ChapterContentComparison: React.FC<ChapterContentComparisonProps> = ({
               title="字数变化"
               value={wordCountDiff}
               suffix="字"
-              valueStyle={{ color: wordCountDiff > 0 ? '#3f8600' : '#cf1322' }}
+              valueStyle={{ color: wordCountDiff > 0 ? 'var(--color-success)' : 'var(--color-error)' }}
               prefix={wordCountDiff > 0 ? '+' : ''}
             />
           </Col>
@@ -165,7 +165,7 @@ const ChapterContentComparison: React.FC<ChapterContentComparisonProps> = ({
               title="变化比例"
               value={wordCountDiffPercent}
               suffix="%"
-              valueStyle={{ color: Math.abs(parseFloat(wordCountDiffPercent)) < 10 ? '#1890ff' : '#faad14' }}
+              valueStyle={{ color: Math.abs(parseFloat(wordCountDiffPercent)) < 10 ? 'var(--color-primary)' : 'var(--color-warning)' }}
               prefix={wordCountDiff > 0 ? '+' : ''}
             />
           </Col>
@@ -173,10 +173,10 @@ const ChapterContentComparison: React.FC<ChapterContentComparisonProps> = ({
       </Card>
 
       {/* 内容对比 */}
-      <div style={{ 
-        maxHeight: 'calc(90vh - 300px)', 
+      <div style={{
+        maxHeight: 'calc(90vh - 300px)',
         overflow: 'auto',
-        border: '1px solid #d9d9d9',
+        border: '1px solid var(--color-border)',
         borderRadius: 4
       }}>
         <ReactDiffViewer
@@ -190,19 +190,19 @@ const ChapterContentComparison: React.FC<ChapterContentComparisonProps> = ({
           styles={{
             variables: {
               light: {
-                diffViewerBackground: '#fff',
-                addedBackground: '#e6ffed',
-                addedColor: '#24292e',
-                removedBackground: '#ffeef0',
-                removedColor: '#24292e',
-                wordAddedBackground: '#acf2bd',
-                wordRemovedBackground: '#fdb8c0',
-                addedGutterBackground: '#cdffd8',
-                removedGutterBackground: '#ffdce0',
-                gutterBackground: '#f6f8fa',
-                gutterBackgroundDark: '#f3f4f6',
-                highlightBackground: '#fffbdd',
-                highlightGutterBackground: '#fff5b1',
+                diffViewerBackground: '#fff', // Keep white for diff viewer readability
+                addedBackground: 'var(--color-success-bg)',
+                addedColor: 'var(--color-text-primary)',
+                removedBackground: 'var(--color-error-bg)',
+                removedColor: 'var(--color-text-primary)',
+                wordAddedBackground: 'var(--color-success-border)',
+                wordRemovedBackground: 'var(--color-error-border)',
+                addedGutterBackground: 'var(--color-success-bg)',
+                removedGutterBackground: 'var(--color-error-bg)',
+                gutterBackground: 'var(--color-bg-layout)',
+                gutterBackgroundDark: 'var(--color-bg-container)',
+                highlightBackground: 'var(--color-warning-bg)',
+                highlightGutterBackground: 'var(--color-warning-border)',
               },
             },
             line: {

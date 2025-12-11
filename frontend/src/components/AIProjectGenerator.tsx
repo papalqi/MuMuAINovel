@@ -44,11 +44,11 @@ export const AIProjectGenerator: React.FC<AIProjectGeneratorProps> = ({
   resumeProjectId
 }) => {
   const navigate = useNavigate();
-  
+
   // 状态管理
   const [loading, setLoading] = useState(false);
   const [projectId, setProjectId] = useState<string>('');
-  
+
   // SSE流式进度状态
   const [progress, setProgress] = useState(0);
   const [progressMessage, setProgressMessage] = useState('');
@@ -58,7 +58,7 @@ export const AIProjectGenerator: React.FC<AIProjectGeneratorProps> = ({
     characters: 'pending',
     outline: 'pending'
   });
-  
+
   // 保存生成数据，用于重试
   const [generationData, setGenerationData] = useState<GenerationConfig | null>(null);
   // 保存世界观生成结果，用于后续步骤
@@ -132,7 +132,7 @@ export const AIProjectGenerator: React.FC<AIProjectGeneratorProps> = ({
         // 世界观已完成,从角色开始
         message.info('世界观已完成,从角色步骤继续...');
         setGenerationSteps({ worldBuilding: 'completed', characters: 'processing', outline: 'pending' });
-        
+
         // 获取世界观数据
         const worldResult = {
           project_id: projectIdParam,
@@ -143,7 +143,7 @@ export const AIProjectGenerator: React.FC<AIProjectGeneratorProps> = ({
         };
         setWorldBuildingResult(worldResult);
         setProgress(33);
-        
+
         await resumeFromCharacters(data, worldResult);
       } else if (wizardStep === 2) {
         // 世界观和角色已完成,从大纲开始
@@ -297,7 +297,7 @@ export const AIProjectGenerator: React.FC<AIProjectGeneratorProps> = ({
     message.success('项目创建成功！正在进入项目...');
     clearStorage();
     setLoading(false);
-    
+
     onComplete(pid);
     setTimeout(() => {
       navigate(`/project/${pid}`);
@@ -319,7 +319,7 @@ export const AIProjectGenerator: React.FC<AIProjectGeneratorProps> = ({
       // 步骤1: 生成世界观并创建项目
       setGenerationSteps(prev => ({ ...prev, worldBuilding: 'processing' }));
       setProgressMessage('正在生成世界观...');
-      
+
       const worldResult = await wizardStreamApi.generateWorldBuildingStream(
         {
           title: data.title,
@@ -367,7 +367,7 @@ export const AIProjectGenerator: React.FC<AIProjectGeneratorProps> = ({
       // 步骤2: 生成角色
       setGenerationSteps(prev => ({ ...prev, characters: 'processing' }));
       setProgressMessage('正在生成角色...');
-      
+
       await wizardStreamApi.generateCharactersStream(
         {
           project_id: createdProjectId,
@@ -406,7 +406,7 @@ export const AIProjectGenerator: React.FC<AIProjectGeneratorProps> = ({
       // 步骤3: 生成大纲
       setGenerationSteps(prev => ({ ...prev, outline: 'processing' }));
       setProgressMessage('正在生成大纲...');
-      
+
       await wizardStreamApi.generateCompleteOutlineStream(
         {
           project_id: createdProjectId,
@@ -441,15 +441,15 @@ export const AIProjectGenerator: React.FC<AIProjectGeneratorProps> = ({
       setProgressMessage('项目创建完成！正在跳转...');
       message.success('项目创建成功！正在进入项目...');
       clearStorage();
-      
+
       // 调用完成回调
       onComplete(createdProjectId);
-      
+
       // 延迟1秒后自动跳转到项目详情页
       setTimeout(() => {
         navigate(`/project/${createdProjectId}`);
       }, 1000);
-      
+
     } catch (error) {
       const apiError = error as ApiError;
       const errorMsg = apiError.response?.data?.detail || apiError.message || '未知错误';
@@ -634,11 +634,11 @@ export const AIProjectGenerator: React.FC<AIProjectGeneratorProps> = ({
     setProgressMessage('项目创建完成！正在跳转...');
     message.success('项目创建成功！正在进入项目...');
     setLoading(false);
-    
+
     // 调用完成回调
     if (projectId) {
       onComplete(projectId);
-      
+
       // 延迟1秒后自动跳转到项目详情页
       setTimeout(() => {
         navigate(`/project/${projectId}`);
@@ -733,11 +733,11 @@ export const AIProjectGenerator: React.FC<AIProjectGeneratorProps> = ({
     setProgressMessage('项目创建完成！正在跳转...');
     message.success('项目创建成功！正在进入项目...');
     setLoading(false);
-    
+
     // 调用完成回调
     if (projectId) {
       onComplete(projectId);
-      
+
       // 延迟1秒后自动跳转到项目详情页
       setTimeout(() => {
         navigate(`/project/${projectId}`);
@@ -748,15 +748,15 @@ export const AIProjectGenerator: React.FC<AIProjectGeneratorProps> = ({
 
   // 获取步骤状态图标和颜色
   const getStepStatus = (step: GenerationStep) => {
-    if (step === 'completed') return { icon: <CheckCircleOutlined />, color: '#52c41a' };
-    if (step === 'processing') return { icon: <LoadingOutlined />, color: '#1890ff' };
-    if (step === 'error') return { icon: '✗', color: '#ff4d4f' };
-    return { icon: '○', color: '#d9d9d9' };
+    if (step === 'completed') return { icon: <CheckCircleOutlined />, color: 'var(--color-success)' };
+    if (step === 'processing') return { icon: <LoadingOutlined />, color: 'var(--color-primary)' };
+    if (step === 'error') return { icon: '✗', color: 'var(--color-error)' };
+    return { icon: '○', color: 'var(--color-text-quaternary)' };
   };
 
   const hasError = generationSteps.worldBuilding === 'error' ||
-                   generationSteps.characters === 'error' ||
-                   generationSteps.outline === 'error';
+    generationSteps.characters === 'error' ||
+    generationSteps.outline === 'error';
 
   // 渲染生成进度页面
   const renderGenerating = () => (
@@ -770,7 +770,7 @@ export const AIProjectGenerator: React.FC<AIProjectGeneratorProps> = ({
         level={isMobile ? 4 : 3}
         style={{
           marginBottom: 32,
-          color: '#fff',
+          color: 'var(--color-text-primary)',
           wordBreak: 'break-word',
           whiteSpace: 'normal',
           overflowWrap: 'break-word'
@@ -784,8 +784,8 @@ export const AIProjectGenerator: React.FC<AIProjectGeneratorProps> = ({
           percent={progress}
           status={hasError ? 'exception' : (progress === 100 ? 'success' : 'active')}
           strokeColor={{
-            '0%': '#667eea',
-            '100%': '#764ba2',
+            '0%': 'var(--color-primary)',
+            '100%': 'var(--color-primary-active)',
           }}
           style={{ marginBottom: 24 }}
         />
@@ -794,7 +794,7 @@ export const AIProjectGenerator: React.FC<AIProjectGeneratorProps> = ({
           style={{
             fontSize: isMobile ? 14 : 16,
             marginBottom: 32,
-            color: hasError ? '#ff4d4f' : '#666',
+            color: hasError ? 'var(--color-error)' : 'var(--color-text-secondary)',
             wordBreak: 'break-word',
             whiteSpace: 'normal',
             overflowWrap: 'break-word'
@@ -808,18 +808,18 @@ export const AIProjectGenerator: React.FC<AIProjectGeneratorProps> = ({
             size="small"
             style={{
               marginBottom: 24,
-              background: '#fff2f0',
-              borderColor: '#ffccc7',
+              background: 'var(--color-error-bg)',
+              borderColor: 'var(--color-error-border)',
               textAlign: 'left',
               maxWidth: '100%',
               overflow: 'hidden'
             }}
           >
-            <Text strong style={{ color: '#ff4d4f' }}>错误详情：</Text>
+            <Text strong style={{ color: 'var(--color-error)' }}>错误详情：</Text>
             <br />
             <Text
               style={{
-                color: '#666',
+                color: 'var(--color-text-secondary)',
                 fontSize: 14,
                 wordBreak: 'break-word',
                 whiteSpace: 'normal',
@@ -855,9 +855,9 @@ export const AIProjectGenerator: React.FC<AIProjectGeneratorProps> = ({
                   alignItems: 'center',
                   justifyContent: 'space-between',
                   padding: isMobile ? '10px 12px' : '12px 20px',
-                  background: step === 'processing' ? '#f0f5ff' : (step === 'error' ? '#fff2f0' : '#fafafa'),
+                  background: step === 'processing' ? 'var(--color-info-bg)' : (step === 'error' ? 'var(--color-error-bg)' : 'var(--color-bg-layout)'),
                   borderRadius: 8,
-                  border: `1px solid ${step === 'processing' ? '#d6e4ff' : (step === 'error' ? '#ffccc7' : '#f0f0f0')}`,
+                  border: `1px solid ${step === 'processing' ? 'var(--color-info-border)' : (step === 'error' ? 'var(--color-error-border)' : 'var(--color-border-secondary)')}`,
                   gap: '8px',
                   maxWidth: '100%',
                   overflow: 'hidden'
@@ -894,7 +894,7 @@ export const AIProjectGenerator: React.FC<AIProjectGeneratorProps> = ({
       <Paragraph
         type="secondary"
         style={{
-          color: '#fff',
+          color: 'var(--color-text-secondary)',
           opacity: 0.9,
           wordBreak: 'break-word',
           whiteSpace: 'normal',
@@ -904,7 +904,7 @@ export const AIProjectGenerator: React.FC<AIProjectGeneratorProps> = ({
       >
         {hasError ? '生成过程中出现错误，请点击重试按钮重新生成' : '请耐心等待，AI正在为您精心创作...'}
       </Paragraph>
-      
+
       {hasError && (
         <Space style={{ marginTop: 16 }}>
           <Button
@@ -918,7 +918,7 @@ export const AIProjectGenerator: React.FC<AIProjectGeneratorProps> = ({
           </Button>
         </Space>
       )}
-      
+
     </div>
   );
 

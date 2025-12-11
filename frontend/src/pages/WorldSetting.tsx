@@ -25,12 +25,13 @@ export default function WorldSetting() {
     rules: string;
   } | null>(null);
   const [isSavingPreview, setIsSavingPreview] = useState(false);
+  const [modal, contextHolder] = Modal.useModal();
 
   // AI重新生成世界观
   const handleRegenerate = async () => {
     if (!currentProject) return;
 
-    Modal.confirm({
+    modal.confirm({
       title: '确认重新生成',
       content: '确定要使用AI重新生成世界观设定吗？这将替换当前的世界观内容。',
       centered: true,
@@ -139,14 +140,14 @@ export default function WorldSetting() {
           backgroundColor: '#fff',
           padding: '16px 0',
           marginBottom: 16,
-          borderBottom: '1px solid #f0f0f0',
+          borderBottom: '1px solid var(--color-border-secondary)',
           display: 'flex',
           alignItems: 'center'
         }}>
-          <GlobalOutlined style={{ fontSize: 24, marginRight: 12, color: '#1890ff' }} />
+          <GlobalOutlined style={{ fontSize: 24, marginRight: 12, color: 'var(--color-primary)' }} />
           <h2 style={{ margin: 0 }}>世界设定</h2>
         </div>
-        
+
         {/* 可滚动内容区域 */}
         <div style={{ flex: 1, overflowY: 'auto' }}>
           <Empty
@@ -164,6 +165,7 @@ export default function WorldSetting() {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+      {contextHolder}
       {/* 固定头部 */}
       <div style={{
         position: 'sticky',
@@ -178,7 +180,7 @@ export default function WorldSetting() {
         justifyContent: 'space-between'
       }}>
         <div style={{ display: 'flex', alignItems: 'center' }}>
-          <GlobalOutlined style={{ fontSize: 24, marginRight: 12, color: '#1890ff' }} />
+          <GlobalOutlined style={{ fontSize: 24, marginRight: 12, color: 'var(--color-primary)' }} />
           <h2 style={{ margin: 0 }}>世界设定</h2>
         </div>
         <Space>
@@ -210,116 +212,116 @@ export default function WorldSetting() {
       {/* 可滚动内容区域 */}
       <div style={{ flex: 1, overflowY: 'auto' }}>
         <Card
-        style={{
-          ...cardStyles.base,
-          marginBottom: 16
-        }}
-        title={
-          <span style={{ fontSize: 18, fontWeight: 500 }}>
-            基础信息
-          </span>
-        }
-      >
-        <Descriptions bordered column={1} styles={{ label: { width: 120, fontWeight: 500 } }}>
-          <Descriptions.Item label="小说名称">{currentProject.title}</Descriptions.Item>
-          {currentProject.description && (
-            <Descriptions.Item label="小说简介">{currentProject.description}</Descriptions.Item>
-          )}
-          <Descriptions.Item label="小说主题">{currentProject.theme || '未设定'}</Descriptions.Item>
-          <Descriptions.Item label="小说类型">{currentProject.genre || '未设定'}</Descriptions.Item>
-          <Descriptions.Item label="叙事视角">{currentProject.narrative_perspective || '未设定'}</Descriptions.Item>
-          <Descriptions.Item label="目标字数">
-            {currentProject.target_words ? `${currentProject.target_words.toLocaleString()} 字` : '未设定'}
-          </Descriptions.Item>
-        </Descriptions>
-      </Card>
+          style={{
+            ...cardStyles.base,
+            marginBottom: 16
+          }}
+          title={
+            <span style={{ fontSize: 18, fontWeight: 500 }}>
+              基础信息
+            </span>
+          }
+        >
+          <Descriptions bordered column={1} styles={{ label: { width: 120, fontWeight: 500 } }}>
+            <Descriptions.Item label="小说名称">{currentProject.title}</Descriptions.Item>
+            {currentProject.description && (
+              <Descriptions.Item label="小说简介">{currentProject.description}</Descriptions.Item>
+            )}
+            <Descriptions.Item label="小说主题">{currentProject.theme || '未设定'}</Descriptions.Item>
+            <Descriptions.Item label="小说类型">{currentProject.genre || '未设定'}</Descriptions.Item>
+            <Descriptions.Item label="叙事视角">{currentProject.narrative_perspective || '未设定'}</Descriptions.Item>
+            <Descriptions.Item label="目标字数">
+              {currentProject.target_words ? `${currentProject.target_words.toLocaleString()} 字` : '未设定'}
+            </Descriptions.Item>
+          </Descriptions>
+        </Card>
 
-      <Card
-        style={{
-          ...cardStyles.base,
-          marginBottom: 16
-        }}
-        title={
-          <span style={{ fontSize: 18, fontWeight: 500 }}>
-            <GlobalOutlined style={{ marginRight: 8 }} />
-            小说世界观
-          </span>
-        }
-      >
-        <div style={{ padding: '16px 0' }}>
-          {currentProject.world_time_period && (
-            <div style={{ marginBottom: 24 }}>
-              <Title level={5} style={{ color: '#1890ff', marginBottom: 12 }}>
-                时间设定
-              </Title>
-              <Paragraph style={{ 
-                fontSize: 15, 
-                lineHeight: 1.8,
-                padding: 16,
-                background: '#f5f5f5',
-                borderRadius: 8,
-                borderLeft: '4px solid #1890ff'
-              }}>
-                {currentProject.world_time_period}
-              </Paragraph>
-            </div>
-          )}
+        <Card
+          style={{
+            ...cardStyles.base,
+            marginBottom: 16
+          }}
+          title={
+            <span style={{ fontSize: 18, fontWeight: 500 }}>
+              <GlobalOutlined style={{ marginRight: 8 }} />
+              小说世界观
+            </span>
+          }
+        >
+          <div style={{ padding: '16px 0' }}>
+            {currentProject.world_time_period && (
+              <div style={{ marginBottom: 24 }}>
+                <Title level={5} style={{ color: 'var(--color-primary)', marginBottom: 12 }}>
+                  时间设定
+                </Title>
+                <Paragraph style={{
+                  fontSize: 15,
+                  lineHeight: 1.8,
+                  padding: 16,
+                  background: 'var(--color-bg-layout)',
+                  borderRadius: 8,
+                  borderLeft: '4px solid var(--color-primary)'
+                }}>
+                  {currentProject.world_time_period}
+                </Paragraph>
+              </div>
+            )}
 
-          {currentProject.world_location && (
-            <div style={{ marginBottom: 24 }}>
-              <Title level={5} style={{ color: '#52c41a', marginBottom: 12 }}>
-                地点设定
-              </Title>
-              <Paragraph style={{
-                fontSize: 15,
-                lineHeight: 1.8,
-                padding: 16,
-                background: '#f5f5f5',
-                borderRadius: 8,
-                borderLeft: '4px solid #52c41a'
-              }}>
-                {currentProject.world_location}
-              </Paragraph>
-            </div>
-          )}
+            {currentProject.world_location && (
+              <div style={{ marginBottom: 24 }}>
+                <Title level={5} style={{ color: 'var(--color-success)', marginBottom: 12 }}>
+                  地点设定
+                </Title>
+                <Paragraph style={{
+                  fontSize: 15,
+                  lineHeight: 1.8,
+                  padding: 16,
+                  background: 'var(--color-bg-layout)',
+                  borderRadius: 8,
+                  borderLeft: '4px solid var(--color-success)'
+                }}>
+                  {currentProject.world_location}
+                </Paragraph>
+              </div>
+            )}
 
-          {currentProject.world_atmosphere && (
-            <div style={{ marginBottom: 24 }}>
-              <Title level={5} style={{ color: '#faad14', marginBottom: 12 }}>
-                氛围设定
-              </Title>
-              <Paragraph style={{
-                fontSize: 15,
-                lineHeight: 1.8,
-                padding: 16,
-                background: '#f5f5f5',
-                borderRadius: 8,
-                borderLeft: '4px solid #faad14'
-              }}>
-                {currentProject.world_atmosphere}
-              </Paragraph>
-            </div>
-          )}
+            {currentProject.world_atmosphere && (
+              <div style={{ marginBottom: 24 }}>
+                <Title level={5} style={{ color: 'var(--color-warning)', marginBottom: 12 }}>
+                  氛围设定
+                </Title>
+                <Paragraph style={{
+                  fontSize: 15,
+                  lineHeight: 1.8,
+                  padding: 16,
+                  background: 'var(--color-bg-layout)',
+                  borderRadius: 8,
+                  borderLeft: '4px solid var(--color-warning)'
+                }}>
+                  {currentProject.world_atmosphere}
+                </Paragraph>
+              </div>
+            )}
 
-          {currentProject.world_rules && (
-            <div style={{ marginBottom: 0 }}>
-              <Title level={5} style={{ color: '#f5222d', marginBottom: 12 }}>
-                规则设定
-              </Title>
-              <Paragraph style={{
-                fontSize: 15,
-                lineHeight: 1.8,
-                padding: 16,
-                background: '#f5f5f5',
-                borderRadius: 8,
-                borderLeft: '4px solid #f5222d'
-              }}>
-                {currentProject.world_rules}
-              </Paragraph>
-            </div>
-          )}
-        </div>
-      </Card>
+            {currentProject.world_rules && (
+              <div style={{ marginBottom: 0 }}>
+                <Title level={5} style={{ color: 'var(--color-error)', marginBottom: 12 }}>
+                  规则设定
+                </Title>
+                <Paragraph style={{
+                  fontSize: 15,
+                  lineHeight: 1.8,
+                  padding: 16,
+                  background: 'var(--color-bg-layout)',
+                  borderRadius: 8,
+                  borderLeft: '4px solid var(--color-error)'
+                }}>
+                  {currentProject.world_rules}
+                </Paragraph>
+              </div>
+            )}
+          </div>
+        </Card>
       </div>
 
       {/* 编辑世界观模态框 */}
@@ -440,14 +442,14 @@ export default function WorldSetting() {
       >
         {newWorldData && (
           <div style={{ maxHeight: '60vh', overflowY: 'auto' }}>
-            <div style={{ marginBottom: 24, padding: 16, background: '#fff7e6', border: '1px solid #ffd591', borderRadius: 8 }}>
+            <div style={{ marginBottom: 24, padding: 16, background: 'var(--color-warning-bg)', border: '1px solid var(--color-warning-border)', borderRadius: 8 }}>
               <Typography.Text type="warning" strong>
                 ⚠️ 注意：点击"确认替换"将会用新内容替换当前的世界观设定
               </Typography.Text>
             </div>
 
             <div style={{ marginBottom: 24 }}>
-              <Title level={5} style={{ color: '#1890ff', marginBottom: 12 }}>
+              <Title level={5} style={{ color: 'var(--color-primary)', marginBottom: 12 }}>
                 时间设定
               </Title>
               <Paragraph style={{

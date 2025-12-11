@@ -16,10 +16,7 @@ import {
 import {
   fetchChangelog,
   groupChangelogByDate,
-  getCachedChangelog,
   cacheChangelog,
-  markChangelogFetched,
-  shouldFetchChangelog,
   clearChangelogCache,
   type ChangelogEntry,
 } from '../services/changelogService';
@@ -50,35 +47,15 @@ export default function ChangelogModal({ visible, onClose }: ChangelogModalProps
   const [hasMore, setHasMore] = useState(true);
 
   // 加载更新日志
+  // 每次用户打开窗口时才同步获取最新数据，不自动刷新
   const loadChangelog = async (pageNum: number = 1, append: boolean = false) => {
     setLoading(true);
     setError(null);
 
     try {
-      // 如果是第一页，先尝试使用缓存
-      if (pageNum === 1 && !append) {
-        const cached = getCachedChangelog();
-        if (cached && cached.length > 0) {
-          setChangelog(cached);
-          
-          // 后台刷新
-          if (shouldFetchChangelog()) {
-            fetchChangelog(pageNum, 30)
-              .then(entries => {
-                setChangelog(entries);
-                cacheChangelog(entries);
-                markChangelogFetched();
-              })
-              .catch(console.error);
-          }
-          
-          setLoading(false);
-          return;
-        }
-      }
-
+      // 每次打开都从网络获取最新数据
       const entries = await fetchChangelog(pageNum, 30);
-      
+
       if (entries.length === 0) {
         setHasMore(false);
       } else {
@@ -86,10 +63,9 @@ export default function ChangelogModal({ visible, onClose }: ChangelogModalProps
           setChangelog(prev => [...prev, ...entries]);
         } else {
           setChangelog(entries);
-          // 缓存第一页数据
+          // 缓存第一页数据（用于分页加载时的数据持久化）
           if (pageNum === 1) {
             cacheChangelog(entries);
-            markChangelogFetched();
           }
         }
       }
@@ -137,7 +113,7 @@ export default function ChangelogModal({ visible, onClose }: ChangelogModalProps
     if (diffDays === 0) return '今天';
     if (diffDays === 1) return '昨天';
     if (diffDays < 7) return `${diffDays} 天前`;
-    
+
     return date.toLocaleDateString('zh-CN', { year: 'numeric', month: 'long', day: 'numeric' });
   };
 
@@ -180,10 +156,10 @@ export default function ChangelogModal({ visible, onClose }: ChangelogModalProps
         <div style={{
           padding: '16px',
           marginBottom: '16px',
-          background: '#fff2e8',
-          border: '1px solid #ffbb96',
+          background: 'var(--color-error-bg)',
+          border: '1px solid var(--color-error-border)',
           borderRadius: '4px',
-          color: '#d4380d',
+          color: 'var(--color-error)',
         }}>
           {error}
         </div>
@@ -199,16 +175,16 @@ export default function ChangelogModal({ visible, onClose }: ChangelogModalProps
         <>
           {sortedDates.map(date => {
             const entries = groupedChangelog.get(date) || [];
-            
+
             return (
               <div key={date} style={{ marginBottom: '32px' }}>
                 <div style={{
                   fontSize: '16px',
                   fontWeight: 600,
-                  color: '#1890ff',
+                  color: 'var(--color-primary)',
                   marginBottom: '16px',
                   paddingBottom: '8px',
-                  borderBottom: '2px solid #e8e8e8',
+                  borderBottom: '2px solid var(--color-border-secondary)',
                 }}>
                   <ClockCircleOutlined style={{ marginRight: '8px' }} />
                   {formatDate(date)}
@@ -217,7 +193,7 @@ export default function ChangelogModal({ visible, onClose }: ChangelogModalProps
                 <Timeline>
                   {entries.map(entry => {
                     const config = typeConfig[entry.type] || typeConfig.other;
-                    
+
                     return (
                       <Timeline.Item
                         key={entry.id}
@@ -226,8 +202,8 @@ export default function ChangelogModal({ visible, onClose }: ChangelogModalProps
                             width: '24px',
                             height: '24px',
                             borderRadius: '50%',
-                            background: '#fff',
-                            border: `2px solid ${config.color === 'default' ? '#d9d9d9' : config.color}`,
+                            background: 'var(--color-bg-container)',
+                            border: `2px solid ${config.color === 'default' ? 'var(--color-border)' : config.color}`,
                             display: 'flex',
                             alignItems: 'center',
                             justifyContent: 'center',
@@ -245,7 +221,7 @@ export default function ChangelogModal({ visible, onClose }: ChangelogModalProps
                             {entry.scope && (
                               <Tag color="blue">{entry.scope}</Tag>
                             )}
-                            <span style={{ color: '#999', fontSize: '12px' }}>
+                            <span style={{ color: 'var(--color-text-tertiary)', fontSize: '12px' }}>
                               {formatTime(entry.date)}
                             </span>
                           </Space>
@@ -254,7 +230,7 @@ export default function ChangelogModal({ visible, onClose }: ChangelogModalProps
                             marginTop: '8px',
                             fontSize: '14px',
                             lineHeight: '1.6',
-                            color: '#333',
+                            color: 'var(--color-text-primary)',
                           }}>
                             {entry.message}
                           </div>
@@ -263,7 +239,7 @@ export default function ChangelogModal({ visible, onClose }: ChangelogModalProps
                             {entry.author.avatar && (
                               <Avatar size="small" src={entry.author.avatar} />
                             )}
-                            <span style={{ color: '#666', fontSize: '13px' }}>
+                            <span style={{ color: 'var(--color-text-secondary)', fontSize: '13px' }}>
                               {entry.author.username || entry.author.name}
                             </span>
                             <a
@@ -284,42 +260,46 @@ export default function ChangelogModal({ visible, onClose }: ChangelogModalProps
             );
           })}
 
-          {hasMore && (
-            <div style={{ textAlign: 'center', marginTop: '24px' }}>
-              <Button
-                type="default"
-                onClick={handleLoadMore}
-                loading={loading}
-              >
-                加载更多
-              </Button>
-            </div>
-          )}
+          {
+            hasMore && (
+              <div style={{ textAlign: 'center', marginTop: '24px' }}>
+                <Button
+                  type="default"
+                  onClick={handleLoadMore}
+                  loading={loading}
+                >
+                  加载更多
+                </Button>
+              </div>
+            )
+          }
 
-          {!hasMore && changelog.length > 0 && (
-            <div style={{
-              textAlign: 'center',
-              color: '#999',
-              padding: '16px 0',
-              fontSize: '14px',
-            }}>
-              已显示所有更新日志
-            </div>
-          )}
+          {
+            !hasMore && changelog.length > 0 && (
+              <div style={{
+                textAlign: 'center',
+                color: 'var(--color-text-tertiary)',
+                padding: '16px 0',
+                fontSize: '14px',
+              }}>
+                已显示所有更新日志
+              </div>
+            )
+          }
         </>
       )}
 
       <div style={{
         marginTop: '24px',
         padding: '12px',
-        background: '#f0f5ff',
+        background: 'var(--color-info-bg)',
         borderRadius: '4px',
-        border: '1px solid #adc6ff',
+        border: '1px solid var(--color-info-border)',
         fontSize: '13px',
-        color: '#1d39c4',
+        color: 'var(--color-primary)',
       }}>
-        💡 提示：更新日志每小时自动刷新一次，数据来源于 GitHub 提交历史
+        💡 提示：每次打开窗口时自动获取最新更新日志，数据来源于 GitHub 提交历史
       </div>
-    </Modal>
+    </Modal >
   );
 }

@@ -46,10 +46,11 @@ export default function AppFooter() {
         right: 0,
         backdropFilter: 'blur(20px) saturate(180%)',
         WebkitBackdropFilter: 'blur(20px) saturate(180%)',
-        borderTop: '1px solid rgba(255, 255, 255, 0.2)',
+        borderTop: '1px solid var(--color-border)',
         padding: isMobile ? '8px 12px' : '10px 16px',
         zIndex: 100,
-        boxShadow: '0 -4px 16px rgba(0, 0, 0, 0.1), 0 -1px 4px rgba(0, 0, 0, 0.06)',
+        boxShadow: 'var(--shadow-card)',
+        backgroundColor: 'rgba(255, 255, 255, 0.8)', // 半透明背景以支持 backdrop-filter
       }}
     >
       <div
@@ -77,29 +78,26 @@ export default function AppFooter() {
                     display: 'flex',
                     alignItems: 'center',
                     gap: 4,
-                    color: '#fff',
-                    textShadow: '0 1px 3px rgba(0, 0, 0, 0.3)',
+                    color: 'var(--color-primary)',
                     cursor: hasUpdate ? 'pointer' : 'default',
                   }}
                 >
-                  <strong style={{ color: '#fff' }}>{VERSION_INFO.projectName}</strong>
+                  <strong style={{ color: 'var(--color-text-primary)' }}>{VERSION_INFO.projectName}</strong>
                   <span>{getVersionString()}</span>
                 </Text>
               </Tooltip>
             </Badge>
-            <Divider type="vertical" style={{ margin: '0 4px', borderColor: 'rgba(255, 255, 255, 0.3)' }} />
+            <Divider type="vertical" style={{ margin: '0 4px', borderColor: 'var(--color-border)' }} />
             <Button
-              type="primary"
+              type="text"
               size="small"
               icon={<GiftOutlined />}
               onClick={() => window.open('https://mumuverse.space:1588/', '_blank')}
               style={{
-                background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
-                border: 'none',
-                boxShadow: '0 2px 8px rgba(102, 126, 234, 0.4)',
+                color: 'var(--color-text-secondary)',
                 fontSize: 11,
                 height: 24,
-                padding: '0 8px',
+                padding: '0 4px',
                 display: 'flex',
                 alignItems: 'center',
                 gap: 4,
@@ -107,7 +105,7 @@ export default function AppFooter() {
             >
               赞助
             </Button>
-            <Divider type="vertical" style={{ margin: '0 4px', borderColor: 'rgba(255, 255, 255, 0.3)' }} />
+            <Divider type="vertical" style={{ margin: '0 4px', borderColor: 'var(--color-border)' }} />
             <Link
               href={VERSION_INFO.githubUrl}
               target="_blank"
@@ -117,8 +115,7 @@ export default function AppFooter() {
                 display: 'flex',
                 alignItems: 'center',
                 gap: 4,
-                color: '#fff',
-                textShadow: '0 1px 3px rgba(0, 0, 0, 0.3)',
+                color: 'var(--color-text-secondary)',
               }}
             >
               <GithubOutlined style={{ fontSize: 12 }} />
@@ -126,8 +123,7 @@ export default function AppFooter() {
             <Text
               style={{
                 fontSize: 10,
-                color: 'rgba(255, 255, 255, 0.8)',
-                textShadow: '0 1px 2px rgba(0, 0, 0, 0.3)',
+                color: 'var(--color-text-tertiary)',
               }}
             >
               <ClockCircleOutlined style={{ fontSize: 10, marginRight: 4 }} />
@@ -139,7 +135,7 @@ export default function AppFooter() {
           <Space
             direction="horizontal"
             size={12}
-            split={<Divider type="vertical" style={{ borderColor: 'rgba(255, 255, 255, 0.3)' }} />}
+            split={<Divider type="vertical" style={{ borderColor: 'var(--color-border)' }} />}
             style={{
               display: 'flex',
               justifyContent: 'center',
@@ -156,8 +152,8 @@ export default function AppFooter() {
                     display: 'flex',
                     alignItems: 'center',
                     gap: 6,
-                    color: '#fff',
-                    textShadow: '0 1px 3px rgba(0, 0, 0, 0.3)',
+                    color: 'var(--color-text-secondary)',
+                    textShadow: 'none',
                     cursor: hasUpdate ? 'pointer' : 'default',
                     transition: 'all 0.3s',
                   }}
@@ -172,7 +168,7 @@ export default function AppFooter() {
                     }
                   }}
                 >
-                  <strong style={{ color: '#fff' }}>{VERSION_INFO.projectName}</strong>
+                  <strong style={{ color: 'var(--color-text-primary)' }}>{VERSION_INFO.projectName}</strong>
                   <span>{getVersionString()}</span>
                 </Text>
               </Tooltip>
@@ -188,8 +184,7 @@ export default function AppFooter() {
                 display: 'flex',
                 alignItems: 'center',
                 gap: 6,
-                color: '#fff',
-                textShadow: '0 1px 3px rgba(0, 0, 0, 0.3)',
+                color: 'var(--color-text-secondary)',
               }}
             >
               <GithubOutlined style={{ fontSize: 13 }} />
@@ -203,8 +198,7 @@ export default function AppFooter() {
               rel="noopener noreferrer"
               style={{
                 fontSize: 12,
-                color: '#fff',
-                textShadow: '0 1px 3px rgba(0, 0, 0, 0.3)',
+                color: 'var(--color-text-secondary)',
               }}
             >
               LinuxDO 社区
@@ -216,9 +210,9 @@ export default function AppFooter() {
               icon={<GiftOutlined style={{ fontSize: 14 }} />}
               onClick={() => window.open('https://mumuverse.space:1588/', '_blank')}
               style={{
-                background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+                background: 'var(--color-primary)',
                 border: 'none',
-                boxShadow: '0 4px 12px rgba(102, 126, 234, 0.5)',
+                boxShadow: '0 4px 12px rgba(77, 128, 136, 0.3)',
                 fontSize: 13,
                 height: 32,
                 padding: '0 20px',
@@ -250,8 +244,7 @@ export default function AppFooter() {
                 display: 'flex',
                 alignItems: 'center',
                 gap: 6,
-                color: '#fff',
-                textShadow: '0 1px 3px rgba(0, 0, 0, 0.3)',
+                color: 'var(--color-text-secondary)',
               }}
             >
               <CopyrightOutlined style={{ fontSize: 11 }} />
@@ -265,8 +258,7 @@ export default function AppFooter() {
                 display: 'flex',
                 alignItems: 'center',
                 gap: 4,
-                color: 'rgba(255, 255, 255, 0.9)',
-                textShadow: '0 1px 3px rgba(0, 0, 0, 0.3)',
+                color: 'var(--color-text-tertiary)',
               }}
             >
               <ClockCircleOutlined style={{ fontSize: 12 }} />
@@ -280,12 +272,12 @@ export default function AppFooter() {
                 display: 'flex',
                 alignItems: 'center',
                 gap: 4,
-                color: '#fff',
-                textShadow: '0 1px 3px rgba(0, 0, 0, 0.3)',
+                color: 'var(--color-text-secondary)',
+                textShadow: '0 1px 3px rgba(0, 0, 0, 0.05)',
               }}
             >
               <span>Made with</span>
-              <HeartFilled style={{ color: '#ff4d4f', fontSize: 11 }} />
+              <HeartFilled style={{ color: 'var(--color-error)', fontSize: 11 }} />
               <span>by {VERSION_INFO.author}</span>
             </Text>
           </Space>

@@ -18,7 +18,7 @@ export default function ProjectWizardNew() {
   const [searchParams] = useSearchParams();
   const [form] = Form.useForm();
   const [isMobile, setIsMobile] = useState(window.innerWidth <= 768);
-  
+
   // 状态管理
   const [currentStep, setCurrentStep] = useState<'form' | 'generating'>('form');
   const [generationConfig, setGenerationConfig] = useState<GenerationConfig | null>(null);
@@ -51,7 +51,7 @@ export default function ProjectWizardNew() {
         throw new Error('获取项目信息失败');
       }
       const project = await response.json();
-      
+
       const config: GenerationConfig = {
         title: project.title,
         description: project.description || '',
@@ -62,7 +62,7 @@ export default function ProjectWizardNew() {
         chapter_count: 3,
         character_count: project.character_count || 5,
       };
-      
+
       setGenerationConfig(config);
       setCurrentStep('generating');
     } catch (error) {
@@ -85,7 +85,7 @@ export default function ProjectWizardNew() {
       character_count: values.character_count || 5,
       outline_mode: values.outline_mode || 'one-to-many', // 添加大纲模式
     };
-    
+
     setGenerationConfig(config);
     setCurrentStep('generating');
   };
@@ -195,7 +195,7 @@ export default function ProjectWizardNew() {
                 <Card
                   hoverable
                   style={{
-                    borderColor: form.getFieldValue('outline_mode') === 'one-to-one' ? '#1890ff' : '#d9d9d9',
+                    borderColor: form.getFieldValue('outline_mode') === 'one-to-one' ? 'var(--color-primary)' : 'var(--color-border)',
                     borderWidth: 2,
                     height: '100%',
                   }}
@@ -204,7 +204,7 @@ export default function ProjectWizardNew() {
                   <Radio value="one-to-one" style={{ width: '100%' }}>
                     <Space direction="vertical" size={4} style={{ width: '100%' }}>
                       <div style={{ fontSize: 16, fontWeight: 'bold' }}>
-                        <CheckCircleOutlined style={{ marginRight: 8, color: '#52c41a' }} />
+                        <CheckCircleOutlined style={{ marginRight: 8, color: 'var(--color-success)' }} />
                         传统模式 (1→1)
                       </div>
                       <div style={{ fontSize: 12, color: '#666' }}>
@@ -217,12 +217,12 @@ export default function ProjectWizardNew() {
                   </Radio>
                 </Card>
               </Col>
-              
+
               <Col xs={24} sm={12}>
                 <Card
                   hoverable
                   style={{
-                    borderColor: form.getFieldValue('outline_mode') === 'one-to-many' ? '#1890ff' : '#d9d9d9',
+                    borderColor: form.getFieldValue('outline_mode') === 'one-to-many' ? 'var(--color-primary)' : 'var(--color-border)',
                     borderWidth: 2,
                     height: '100%',
                   }}
@@ -231,7 +231,7 @@ export default function ProjectWizardNew() {
                   <Radio value="one-to-many" style={{ width: '100%' }}>
                     <Space direction="vertical" size={4} style={{ width: '100%' }}>
                       <div style={{ fontSize: 16, fontWeight: 'bold' }}>
-                        <CheckCircleOutlined style={{ marginRight: 8, color: '#52c41a' }} />
+                        <CheckCircleOutlined style={{ marginRight: 8, color: 'var(--color-success)' }} />
                         细化模式 (1→N) 推荐
                       </div>
                       <div style={{ fontSize: 12, color: '#666' }}>
@@ -321,17 +321,15 @@ export default function ProjectWizardNew() {
   return (
     <div style={{
       minHeight: '100vh',
-      background: currentStep === 'generating' 
-        ? 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)'
-        : '#f5f7fa',
+      background: 'var(--color-bg-base)',
     }}>
       {/* 顶部标题栏 - 固定不滚动 */}
       <div style={{
         position: 'sticky',
         top: 0,
         zIndex: 100,
-        background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
-        boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
+        background: 'var(--color-primary)',
+        boxShadow: 'var(--shadow-header)',
       }}>
         <div style={{
           maxWidth: 1200,
@@ -354,7 +352,7 @@ export default function ProjectWizardNew() {
           >
             {isMobile ? '返回' : '返回首页'}
           </Button>
-          
+
           <Title level={isMobile ? 4 : 2} style={{
             margin: 0,
             color: '#fff',
@@ -362,7 +360,7 @@ export default function ProjectWizardNew() {
           }}>
             项目创建向导
           </Title>
-          
+
           <div style={{ width: isMobile ? 60 : 120 }}></div>
         </div>
       </div>
