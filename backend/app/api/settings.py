@@ -349,6 +349,8 @@ class ApiTestRequest(BaseModel):
     api_base_url: str
     provider: str
     llm_model: str
+    temperature: Optional[float] = None
+    max_tokens: Optional[int] = None
 
 
 @router.post("/check-function-calling")
@@ -578,7 +580,7 @@ async def test_api_connection(data: ApiTestRequest):
     测试 API 连接和配置是否正确
     
     Args:
-        data: 包含 API 配置的请求数据
+        data: 包含 API 配置的请求数据（包括 temperature 和 max_tokens）
     
     Returns:
         测试结果包含状态、响应时间和详细信息
@@ -587,19 +589,22 @@ async def test_api_connection(data: ApiTestRequest):
     api_base_url = data.api_base_url
     provider = data.provider
     llm_model = data.llm_model
+    # 使用前端传递的参数，如果未传递则使用默认值
+    temperature = data.temperature if data.temperature is not None else 0.7
+    max_tokens = data.max_tokens if data.max_tokens is not None else 2000
     import time
     
     try:
         start_time = time.time()
         
-        # 创建临时 AI 服务实例
+        # 创建临时 AI 服务实例，使用前端传递的参数
         test_service = AIService(
             api_provider=provider,
             api_key=api_key,
             api_base_url=api_base_url,
             default_model=llm_model,
-            default_temperature=0.7,
-            default_max_tokens=100
+            default_temperature=temperature,
+            default_max_tokens=max_tokens
         )
         
         # 发送简单的测试请求
@@ -609,13 +614,15 @@ async def test_api_connection(data: ApiTestRequest):
         logger.info(f"  - 提供商: {provider}")
         logger.info(f"  - 模型: {llm_model}")
         logger.info(f"  - Base URL: {api_base_url}")
+        logger.info(f"  - Temperature: {temperature}")
+        logger.info(f"  - Max Tokens: {max_tokens}")
         
         response = await test_service.generate_text(
             prompt=test_prompt,
             provider=provider,
             model=llm_model,
-            temperature=0.7,
-            max_tokens=8000,
+            temperature=temperature,
+            max_tokens=max_tokens,
             auto_mcp=False  # 测试时不加载MCP工具
         )
         
@@ -639,7 +646,9 @@ async def test_api_connection(data: ApiTestRequest):
             "details": {
                 "api_available": True,
                 "model_accessible": True,
-                "response_valid": bool(response)
+                "response_valid": bool(response),
+                "temperature": temperature,
+                "max_tokens": max_tokens
             }
         }
         

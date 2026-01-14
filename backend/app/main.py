@@ -184,7 +184,7 @@ else:
     @app.get("/")
     async def root():
         return {
-            "message": "欢迎使用AI Story Creator",
+            "message": "欢迎使用MuMuAINovel",
             "version": config_settings.app_version,
             "docs": "/docs",
             "notice": "请先构建前端: cd frontend && npm run build"
