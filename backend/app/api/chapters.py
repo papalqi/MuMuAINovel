@@ -397,7 +397,9 @@ async def delete_chapter(
     )
     project = result.scalar_one_or_none()
     if project:
-        project.current_words = max(0, project.current_words - chapter.word_count)
+        # 处理 word_count 和 current_words 可能为 None 的情况
+        chapter_word_count = chapter.word_count or 0
+        project.current_words = max(0, (project.current_words or 0) - chapter_word_count)
     
     # 🗑️ 清理向量数据库中的记忆数据
     try:
@@ -897,14 +899,36 @@ async def analyze_chapter_background(
         )
         logger.info(f"📋 后台分析 - 已获取{len(existing_foreshadows)}个已埋入伏笔用于匹配（含智能回收标记）")
         
-        # 3. 使用PlotAnalyzer分析章节（传入已有伏笔列表）
+        # 定义重试回调函数，用于在重试时更新任务状态
+        async def on_retry_callback(attempt: int, max_retries: int, wait_time: int, error_reason: str):
+            """重试时更新任务状态，让前端能感知到重试进度"""
+            try:
+                async with write_lock:
+                    # 重新获取任务（确保获取最新状态）
+                    task_result_retry = await db_session.execute(
+                        select(AnalysisTask).where(AnalysisTask.id == task_id)
+                    )
+                    task_retry = task_result_retry.scalar_one_or_none()
+                    if task_retry:
+                        # 更新任务状态，保持 running 但更新 started_at 以重置超时计时器
+                        task_retry.status = 'running'
+                        task_retry.started_at = datetime.now()  # 重置开始时间，防止超时检测误判
+                        task_retry.progress = 25 + attempt * 5  # 根据重试次数更新进度
+                        task_retry.error_message = f"正在重试({attempt}/{max_retries})：{error_reason[:100]}"
+                        await db_session.commit()
+                        logger.info(f"🔄 分析任务重试状态已更新: 尝试 {attempt}/{max_retries}, 等待 {wait_time}s, 原因: {error_reason[:50]}...")
+            except Exception as callback_error:
+                logger.warning(f"⚠️ 更新重试状态失败: {callback_error}")
+        
+        # 3. 使用PlotAnalyzer分析章节（传入已有伏笔列表和重试回调）
         analyzer = PlotAnalyzer(ai_service)
         analysis_result = await analyzer.analyze_chapter(
             chapter_number=chapter.chapter_number,
             title=chapter.title,
             content=chapter.content,
             word_count=chapter.word_count or len(chapter.content),
-            existing_foreshadows=existing_foreshadows
+            existing_foreshadows=existing_foreshadows,
+            on_retry=on_retry_callback
         )
         
         if not analysis_result:

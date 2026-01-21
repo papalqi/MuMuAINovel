@@ -994,11 +994,11 @@ export default function Outline() {
   // 删除展开的章节内容（保留大纲）
   const handleDeleteExpandedChapters = async (outlineTitle: string, chapters: Array<{ id: string }>) => {
     try {
-      // 批量删除所有章节
-      const deletePromises = chapters.map(chapter =>
-        chapterApi.deleteChapter(chapter.id)
-      );
-      await Promise.all(deletePromises);
+      // 使用顺序删除避免并发导致的字数计算竞态条件
+      // 并发删除会导致多个请求同时读取项目字数并各自减去章节字数，造成计算错误
+      for (const chapter of chapters) {
+        await chapterApi.deleteChapter(chapter.id);
+      }
 
       message.success(`已删除《${outlineTitle}》展开的所有 ${chapters.length} 个章节`);
       await refreshOutlines();
@@ -1007,6 +1007,18 @@ export default function Outline() {
         const updatedProject = await projectApi.getProject(currentProject.id);
         setCurrentProject(updatedProject);
       }
+      // 更新展开状态
+      setOutlineExpandStatus(prev => {
+        const newStatus = { ...prev };
+        // 找到被删除章节对应的大纲ID并更新其状态
+        const outlineId = Object.keys(newStatus).find(id =>
+          outlines.find(o => o.id === id && o.title === outlineTitle)
+        );
+        if (outlineId) {
+          newStatus[outlineId] = false;
+        }
+        return newStatus;
+      });
     } catch (error: unknown) {
       const apiError = error as ApiError;
       message.error(apiError.response?.data?.detail || '删除章节失败');
