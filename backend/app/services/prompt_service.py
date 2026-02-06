@@ -294,7 +294,6 @@ class PromptService:
 类型：{genre}
 开篇章节数：{chapter_count}
 叙事视角：{narrative_perspective}
-全书目标字数：{target_words}
 </project>
 
 <worldview priority="P1">
@@ -327,9 +326,9 @@ class PromptService:
   {{
     "chapter_number": 1,
     "title": "章节标题",
-    "summary": "章节概要（300-500字）：主要情节、冲突、转折",
+    "summary": "章节概要（500-1000字）：主要情节、角色互动、关键事件、冲突与转折",
     "scenes": ["场景1描述", "场景2描述", "场景3描述"],
-    "characters": ["角色1", "角色2"],
+    "characters": ["涉及角色1", "涉及角色2"],
     "key_points": ["情节要点1", "情节要点2"],
     "emotion": "本章情感基调",
     "goal": "本章叙事目标"
@@ -348,8 +347,9 @@ class PromptService:
 
 【格式规范】
 - 纯JSON数组输出，无markdown标记
-- 内容描述中严禁使用特殊符号（引号、方括号、书名号等）
-- 专有名词、事件名直接书写
+- 内容描述中严禁使用特殊符号
+- 专有名词直接书写
+- 字段结构与已有章节完全一致
 </output>
 
 <constraints>
@@ -367,6 +367,7 @@ class PromptService:
 ✅ 符合类型：情节符合{genre}类型特征
 ✅ 主题贴合：体现主题"{theme}"
 ✅ 开篇定位：是开局而非完整故事
+✅ 描述详细：每个summary 500-1000字
 
 【禁止事项】
 ❌ 输出markdown或代码块标记
@@ -375,7 +376,7 @@ class PromptService:
 ❌ 节奏过快，信息过载
 </constraints>"""
     
-    # 大纲续写提示词 V2（RTCO框架 + 记忆增强）
+    # 大纲续写提示词 V2（RTCO框架 - 简化版）
     OUTLINE_CONTINUE = """<system>
 你是经验丰富的小说作家和编剧，擅长续写{genre}类型的小说大纲。
 </system>
@@ -399,7 +400,7 @@ class PromptService:
 叙事视角：{narrative_perspective}
 </project>
 
-<worldview priority="P2">
+<worldview priority="P1">
 【世界观】
 时间背景：{time_period}
 地理位置：{location}
@@ -407,34 +408,26 @@ class PromptService:
 世界规则：{rules}
 </worldview>
 
-<characters priority="P1">
-【角色信息】
+<previous_context priority="P0">
+{recent_outlines}
+</previous_context>
+
+<characters priority="P0">
+【所有角色信息】
 {characters_info}
 </characters>
 
-<previous_context priority="P0">
-【已有章节概览】（共{current_chapter_count}章）
-{all_chapters_brief}
-
-【最近剧情】
-{recent_plot}
-</previous_context>
-
-<memory priority="P1">
-【🧠 智能记忆系统 - 续写参考】
-以下是从故事记忆库中检索到的相关信息：
-
-{memory_context}
-</memory>
+<user_input priority="P0">
+【用户输入】
+续写章节数：{chapter_count}章
+情节阶段：{plot_stage_instruction}
+故事方向：{story_direction}
+其他要求：{requirements}
+</user_input>
 
 <mcp_context priority="P2">
 {mcp_references}
 </mcp_context>
-
-<requirements priority="P1">
-【其他要求】
-{requirements}
-</requirements>
 
 <output priority="P0">
 【输出格式】
@@ -444,7 +437,7 @@ class PromptService:
   {{
     "chapter_number": {start_chapter},
     "title": "章节标题",
-    "summary": "章节概要（300-500字）：主要情节、角色互动、关键事件、冲突与转折",
+    "summary": "章节概要（500-1000字）：主要情节、角色互动、关键事件、冲突与转折",
     "scenes": ["场景1描述", "场景2描述", "场景3描述"],
     "characters": ["涉及角色1", "涉及角色2"],
     "key_points": ["情节要点1", "情节要点2"],
@@ -473,16 +466,15 @@ class PromptService:
 <constraints>
 【续写要求】
 ✅ 剧情连贯：与前文自然衔接，保持连贯性
-✅ 记忆参考：适当参考记忆中的伏笔、钩子、情节点
-✅ 伏笔回收：考虑回收未完结伏笔，制造呼应
-✅ 角色发展：遵循角色成长轨迹
+✅ 角色发展：遵循角色成长轨迹，充分利用角色信息
 ✅ 情节阶段：遵循{plot_stage_instruction}的要求
 ✅ 风格一致：保持与已有章节相同风格和详细程度
+✅ 大纲详细：充分解析最近10章大纲的structure字段信息
 
 【必须遵守】
 ✅ 数量精确：数组包含{chapter_count}个章节
 ✅ 编号正确：从第{start_chapter}章开始
-✅ 描述详细：每个summary 100-200字
+✅ 描述详细：每个summary 500-1000字
 ✅ 承上启下：自然衔接前文
 
 【禁止事项】
@@ -490,10 +482,11 @@ class PromptService:
 ❌ 在描述中使用特殊符号
 ❌ 与前文矛盾或脱节
 ❌ 忽略已有角色发展
+❌ 忽略最近大纲中的情节线索
 </constraints>"""
     
-    # 章节生成V2 - 无前置章节版本（用于第1章）
-    CHAPTER_GENERATION_V2 = """<system>
+    # 章节生成 - 1-N模式（第1章）
+    CHAPTER_GENERATION_ONE_TO_MANY = """<system>
 你是《{project_title}》的作者，一位专注于{genre}类型的网络小说家。
 </system>
 
@@ -537,8 +530,127 @@ class PromptService:
 现在开始创作：
 </output>"""
 
-    # 章节生成V2 - 带前置章节版本（用于第2章及以后）
-    CHAPTER_GENERATION_V2_WITH_CONTEXT = """<system>
+    # 章节生成 - 1-1模式（第1章）
+    CHAPTER_GENERATION_ONE_TO_ONE = """<system>
+你是《{project_title}》的作者，一位专注于{genre}类型的网络小说家。
+</system>
+
+<task priority="P0">
+【创作任务】
+撰写第{chapter_number}章《{chapter_title}》的完整正文。
+
+【基本要求】
+- 目标字数：{target_word_count}字（允许±200字浮动）
+- 叙事视角：{narrative_perspective}
+</task>
+
+<outline priority="P0">
+【本章大纲】
+{chapter_outline}
+</outline>
+
+<characters priority="P1">
+【本章角色】
+{characters_info}
+</characters>
+
+<careers priority="P2">
+【本章职业】
+{chapter_careers}
+</careers>
+
+<constraints>
+【必须遵守】
+✅ 严格按照大纲推进情节
+✅ 保持角色性格、说话方式一致
+✅ 字数需要严格控制在目标字数内
+
+【禁止事项】
+❌ 输出章节标题、序号等元信息
+❌ 使用"总之"、"综上所述"等AI常见总结语
+❌ 添加作者注释或创作说明
+❌ 生成字数禁止超过目标字数
+</constraints>
+
+<output>
+【输出规范】
+直接输出小说正文内容，从故事场景或动作开始。
+无需任何前言、后记或解释性文字。
+
+现在开始创作：
+</output>"""
+
+    # 章节生成 - 1-1模式（第2章及以后）
+    CHAPTER_GENERATION_ONE_TO_ONE_NEXT = """<system>
+你是《{project_title}》的作者，一位专注于{genre}类型的网络小说家。
+</system>
+
+<task priority="P0">
+【创作任务】
+撰写第{chapter_number}章《{chapter_title}》的完整正文。
+
+【基本要求】
+- 目标字数：{target_word_count}字（允许±200字浮动）
+- 叙事视角：{narrative_perspective}
+</task>
+
+<outline priority="P0">
+【本章大纲】
+{chapter_outline}
+</outline>
+
+<previous_chapter priority="P1">
+【上一章末尾500字内容】
+{previous_chapter_content}
+</previous_chapter>
+
+<characters priority="P1">
+【本章角色】
+{characters_info}
+</characters>
+
+<careers priority="P2">
+【本章职业】
+{chapter_careers}
+</careers>
+
+<foreshadow_reminders priority="P2">
+【🎯 伏笔提醒】
+{foreshadow_reminders}
+</foreshadow_reminders>
+
+<memory priority="P2">
+【相关记忆】
+{relevant_memories}
+</memory>
+
+<constraints>
+【必须遵守】
+✅ 严格按照大纲推进情节
+✅ 自然承接上一章末尾内容，保持连贯性
+✅ 保持角色性格、说话方式一致
+✅ 字数需要严格控制在目标字数内
+✅ 如有伏笔提醒，请在本章中适当埋入或回收相应伏笔
+
+【禁止事项】
+❌ 输出章节标题、序号等元信息
+❌ 使用"总之"、"综上所述"等AI常见总结语
+❌ 在结尾处使用开放式反问
+❌ 添加作者注释或创作说明
+❌ 重复上一章已发生的事件
+❌ 生成字数禁止超过目标字数
+</constraints>
+
+<output>
+【输出规范】
+直接输出小说正文内容，从故事场景或动作开始。
+无需任何前言、后记或解释性文字。
+
+现在开始创作：
+</output>"""
+
+    # 章节生成 - 1-N模式（第2章及以后）
+    CHAPTER_GENERATION_ONE_TO_MANY_NEXT = """<system>
 你是《{project_title}》的作者，一位专注于{genre}类型的网络小说家。
 </system>
 
@@ -870,7 +982,7 @@ class PromptService:
 - **category**：分类（identity=身世/mystery=悬念/item=物品/relationship=关系/event=事件/ability=能力/prophecy=预言）
 - **is_long_term**：是否长线伏笔（跨10章以上回收为true）
 - **related_characters**：涉及的角色名列表
-- **estimated_resolve_chapter**：预估回收章节号（埋下时预估，回收时为当前章节）
+- **estimated_resolve_chapter**：【必填】预估回收章节号（埋下时必须预估，回收时为当前章节）
 
 **3. 冲突分析 (Conflict)**
 - 冲突类型：人与人/人与己/人与环境/人与社会
@@ -1997,7 +2109,12 @@ class PromptService:
 
 <task>
 【设计任务】
-根据世界观信息，设计一个完整且合理的职业体系，包括主职业和副职业。
+根据世界观信息和项目简介，设计一个完整且合理的职业体系。
+职业体系必须与项目简介中的故事背景和角色设定高度契合。
+
+【数量要求】
+- 主职业：精确生成3个
+- 副职业：精确生成2个
 </task>
 
 <worldview priority="P0">
@@ -2005,6 +2122,9 @@ class PromptService:
 书名：{title}
 类型：{genre}
 主题：{theme}
+简介：{description}
+
+【世界观设定】
 时间背景：{time_period}
 地理位置：{location}
 氛围基调：{atmosphere}
@@ -2014,23 +2134,32 @@ class PromptService:
 <design_requirements priority="P0">
 【设计要求】
 
-**1. 主职业（main_careers）**
-- 根据世界观特点，决定需要多少个主职业
+**1. 主职业（main_careers）- 必须精确生成3个**
 - 主职业是角色的核心发展方向
-- 必须严格符合世界观规则
+- 必须严格符合世界观规则和简介中的故事背景
+- 3个主职业应该覆盖不同的发展路线（如：战斗型、智慧型、特殊型）
 - 每个主职业的阶段数量可以不同（体现职业复杂度差异）
+- 职业设计要能支撑简介中描述的故事情节
 
-**2. 副职业（sub_careers）**
-- 根据世界需要，决定需要多少个副职业
+**2. 副职业（sub_careers）- 必须精确生成2个**
 - 副职业包含生产、辅助、特殊技能类
+- 2个副职业应该具有互补性，丰富角色的多样性
 - 每个副职业的阶段数量可以不同
 - 不要让所有副职业都是相同的阶段数
+- 副职业要能为主职业提供辅助或增益
 
 **3. 阶段设计（stages）**
 - 每个职业的stages数组长度必须等于max_stage
 - 阶段名称要符合世界观文化背景
 - 阶段描述要体现明确的能力提升路径
 - 确保职业间的阶段数量有差异
+- 主职业阶段数建议：8-12个
+- 副职业阶段数建议：5-8个
+
+**4. 简介契合度**
+- 职业体系必须与项目简介中的故事设定相匹配
+- 如果简介中提到特定职业或能力，优先设计相关职业
+- 职业的能力和特点要能支撑简介中的情节发展
 </design_requirements>
 
 <output priority="P0">
@@ -2072,17 +2201,22 @@ class PromptService:
 
 <constraints>
 【必须遵守】
-✅ 职业数量和类型根据世界观自行决定
+✅ 主职业数量：必须精确生成3个，不多不少
+✅ 副职业数量：必须精确生成2个，不多不少
 ✅ 不同职业的max_stage必须不同
-✅ 主职业阶段数建议：5-15个
-✅ 副职业阶段数建议：3-10个
+✅ 主职业阶段数建议：8-12个
+✅ 副职业阶段数建议：5-8个
 ✅ stages数组长度必须等于max_stage
 ✅ 确保职业体系与世界观高度契合
+✅ 职业设计必须支撑项目简介中的故事情节
 
 【禁止事项】
+❌ 生成超过3个主职业或少于3个主职业
+❌ 生成超过2个副职业或少于2个副职业
 ❌ 所有职业使用相同的阶段数
 ❌ 输出markdown标记
-❌ 职业设计与世界观脱节
+❌ 职业设计与世界观或简介脱节
+❌ 忽略简介中提到的职业或能力设定
 </constraints>"""
 
     # 局部重写提示词（RTCO框架）
@@ -2441,7 +2575,7 @@ class PromptService:
                 "parameters": ["project_context", "user_input"]
             },
             "OUTLINE_CREATE": {
-                "name": "初始大纲生成",
+                "name": "大纲生成",
                 "category": "大纲生成",
                 "description": "根据项目信息生成完整的章节大纲",
                 "parameters": ["title", "theme", "genre", "chapter_count", "narrative_perspective", "target_words", 
@@ -2456,20 +2590,35 @@ class PromptService:
                              "all_chapters_brief", "recent_plot", "memory_context", "mcp_references", 
                              "plot_stage_instruction", "start_chapter", "end_chapter", "story_direction", "requirements"]
             },
-            "CHAPTER_GENERATION_V2": {
-                "name": "章节创作V2（首章）",
+            "CHAPTER_GENERATION_ONE_TO_MANY": {
+                "name": "章节创作-1-N模式（第1章）",
                 "category": "章节创作",
-                "description": "根据大纲创作章节内容（用于第1章，无前置章节）",
+                "description": "1-N模式：根据大纲创作章节内容（用于第1章，无前置章节）",
                 "parameters": ["project_title", "genre", "chapter_number", "chapter_title", "chapter_outline",
                              "target_word_count", "narrative_perspective", "characters_info"]
             },
-            "CHAPTER_GENERATION_V2_WITH_CONTEXT": {
-                "name": "章节创作V2（续章）",
+            "CHAPTER_GENERATION_ONE_TO_MANY_NEXT": {
+                "name": "章节创作-1-N模式（第2章及以后）",
                 "category": "章节创作",
-                "description": "基于前置章节内容创作新章节（用于第2章及以后）",
+                "description": "1-N模式：基于前置章节内容创作新章节（用于第2章及以后）",
                 "parameters": ["project_title", "genre", "chapter_number", "chapter_title", "chapter_outline",
                              "target_word_count", "narrative_perspective", "characters_info", "continuation_point",
                              "foreshadow_reminders", "relevant_memories", "story_skeleton", "previous_chapter_summary"]
+            },
+            "CHAPTER_GENERATION_ONE_TO_ONE": {
+                "name": "章节创作-1-1模式（第1章）",
+                "category": "章节创作",
+                "description": "1-1模式：章节创作（用于第1章，无前置章节）",
+                "parameters": ["project_title", "genre", "chapter_number", "chapter_title", "chapter_outline",
+                             "target_word_count", "narrative_perspective", "characters_info", "chapter_careers"]
+            },
+            "CHAPTER_GENERATION_ONE_TO_ONE_NEXT": {
+                "name": "章节创作-1-1模式（第2章及以后）",
+                "category": "章节创作",
+                "description": "1-1模式：基于上一章内容创作新章节（用于第2章及以后）",
+                "parameters": ["project_title", "genre", "chapter_number", "chapter_title", "chapter_outline",
+                             "target_word_count", "narrative_perspective", "previous_chapter_content",
+                             "characters_info", "chapter_careers", "foreshadow_reminders", "relevant_memories"]
             },
             "CHAPTER_REGENERATION_SYSTEM": {
                 "name": "章节重写系统提示",
@@ -2565,8 +2714,8 @@ class PromptService:
             "CAREER_SYSTEM_GENERATION": {
                 "name": "职业体系生成",
                 "category": "世界构建",
-                "description": "根据世界观自动生成完整的职业体系，包括主职业和副职业",
-                "parameters": ["title", "genre", "theme", "time_period", "location", "atmosphere", "rules"]
+                "description": "根据世界观和项目简介自动生成完整的职业体系，包括主职业和副职业",
+                "parameters": ["title", "genre", "theme", "description", "time_period", "location", "atmosphere", "rules"]
             },
             "INSPIRATION_TITLE_SYSTEM": {
                 "name": "灵感模式-书名生成(系统提示词)",

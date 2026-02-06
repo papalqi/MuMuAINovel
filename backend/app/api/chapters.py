@@ -11,7 +11,10 @@ from asyncio import Queue, Lock
 
 from app.database import get_db
 from app.api.common import verify_project_access
-from app.services.chapter_context_service import ChapterContextBuilder, FocusedMemoryRetriever
+from app.services.chapter_context_service import (
+    OneToManyContextBuilder,
+    OneToOneContextBuilder
+)
 from app.models.chapter import Chapter
 from app.models.project import Project
 from app.models.outline import Outline
@@ -1325,55 +1328,6 @@ async def generate_chapter_content_stream(
                 )
                 outline = outline_result.scalar_one_or_none()
                 
-                # 获取所有大纲用于上下文
-                all_outlines_result = await db_session.execute(
-                    select(Outline)
-                    .where(Outline.project_id == current_chapter.project_id)
-                    .order_by(Outline.order_index)
-                    .execution_options(populate_existing=True)
-                )
-                all_outlines = all_outlines_result.scalars().all()
-                outlines_context = "\n".join([
-                    f"第{o.order_index}章 {o.title}: {o.content[:100]}..."
-                    for o in all_outlines
-                ])
-                
-                # 获取角色信息（包含职业信息）
-                characters_result = await db_session.execute(
-                    select(Character).where(Character.project_id == current_chapter.project_id)
-                )
-                characters = characters_result.scalars().all()
-                
-                # 📝 根据大纲模式智能筛选相关角色
-                filter_character_names = None
-                if outline_mode == 'one-to-one':
-                    # 1-1模式：从outline.structure中提取characters字段
-                    if outline and outline.structure:
-                        try:
-                            structure = json.loads(outline.structure)
-                            filter_character_names = structure.get('characters', [])
-                            if filter_character_names:
-                                logger.info(f"📋 1-1模式：从structure提取角色列表 {filter_character_names}")
-                        except json.JSONDecodeError:
-                            logger.warning(f"⚠️ outline.structure解析失败，使用全部角色")
-                else:
-                    # 1-n模式：从chapter.expansion_plan中提取character_focus字段
-                    if current_chapter.expansion_plan:
-                        try:
-                            plan = json.loads(current_chapter.expansion_plan)
-                            filter_character_names = plan.get('character_focus', [])
-                            if filter_character_names:
-                                logger.info(f"📋 1-n模式：从expansion_plan提取角色焦点 {filter_character_names}")
-                        except json.JSONDecodeError:
-                            logger.warning(f"⚠️ expansion_plan解析失败，使用全部角色")
-                
-                characters_info = await build_characters_info_with_careers(
-                    db=db_session,
-                    project_id=current_chapter.project_id,
-                    characters=characters,
-                    filter_character_names=filter_character_names
-                )
-                
                 # 获取写作风格
                 style_content = ""
                 if style_id:
@@ -1395,23 +1349,59 @@ async def generate_chapter_content_stream(
                 else:
                     logger.info("未指定写作风格，使用原始提示词")
                 
-                # 🚀 使用新的优化上下文构建器（含伏笔服务）
-                logger.info(f"🔧 使用优化的章节上下文构建器（V2 + 伏笔提醒）")
-                context_builder = ChapterContextBuilder(foreshadow_service=foreshadow_service)
-                chapter_context = await context_builder.build(
-                    chapter=current_chapter,
-                    project=project,
-                    outline=outline,
-                    user_id=current_user_id,
-                    db=db_session
-                )
-                
-                # 日志输出统计信息
-                logger.info(f"📊 优化上下文统计:")
-                logger.info(f"  - 章节序号: {current_chapter.chapter_number}")
-                logger.info(f"  - 衔接锚点长度: {len(chapter_context.continuation_point or '')} 字符")
-                logger.info(f"  - 相关记忆: {chapter_context.context_stats.get('memory_count', 0)} 条")
-                logger.info(f"  - 总上下文长度: {chapter_context.context_stats.get('total_length', 0)} 字符")
+                # 🚀 根据大纲模式选择独立的上下文构建器
+                if outline_mode == 'one-to-one':
+                    # ========== 1-1模式：使用独立的简化构建器 ==========
+                    logger.info(f"🔧 [1-1模式] 使用 OneToOneContextBuilder")
+                    context_builder = OneToOneContextBuilder(
+                        memory_service=memory_service,
+                        foreshadow_service=foreshadow_service
+                    )
+                    chapter_context = await context_builder.build(
+                        chapter=current_chapter,
+                        project=project,
+                        outline=outline,
+                        user_id=current_user_id,
+                        db=db_session,
+                        target_word_count=target_word_count
+                    )
+                    
+                    # 日志输出统计信息
+                    logger.info(f"📊 [1-1模式] 上下文统计:")
+                    logger.info(f"  - 章节序号: {current_chapter.chapter_number}")
+                    logger.info(f"  - 大纲长度: {chapter_context.context_stats.get('outline_length', 0)} 字符")
+                    logger.info(f"  - 上一章内容: {chapter_context.context_stats.get('previous_content_length', 0)} 字符")
+                    logger.info(f"  - 角色信息: {chapter_context.context_stats.get('characters_length', 0)} 字符")
+                    logger.info(f"  - 伏笔提醒: {chapter_context.context_stats.get('foreshadow_length', 0)} 字符")
+                    logger.info(f"  - 相关记忆: {chapter_context.context_stats.get('memories_length', 0)} 字符")
+                    logger.info(f"  - 总长度: {chapter_context.context_stats.get('total_length', 0)} 字符")
+                else:
+                    # ========== 1-N模式：使用独立的完整构建器 ==========
+                    logger.info(f"🔧 [1-N模式] 使用 OneToManyContextBuilder")
+                    context_builder = OneToManyContextBuilder(
+                        memory_service=memory_service,
+                        foreshadow_service=foreshadow_service
+                    )
+                    chapter_context = await context_builder.build(
+                        chapter=current_chapter,
+                        project=project,
+                        outline=outline,
+                        user_id=current_user_id,
+                        db=db_session,
+                        style_content=style_content,
+                        target_word_count=target_word_count,
+                        temp_narrative_perspective=temp_narrative_perspective
+                    )
+                    
+                    # 日志输出统计信息
+                    logger.info(f"📊 [1-N模式] 上下文统计:")
+                    logger.info(f"  - 章节序号: {current_chapter.chapter_number}")
+                    logger.info(f"  - 衔接锚点: {chapter_context.context_stats.get('continuation_length', 0)} 字符")
+                    logger.info(f"  - 角色信息: {chapter_context.context_stats.get('characters_length', 0)} 字符")
+                    logger.info(f"  - 相关记忆: {chapter_context.context_stats.get('memories_length', 0)} 字符")
+                    logger.info(f"  - 故事骨架: {chapter_context.context_stats.get('skeleton_length', 0)} 字符")
+                    logger.info(f"  - 伏笔提醒: {chapter_context.context_stats.get('foreshadow_length', 0)} 字符")
+                    logger.info(f"  - 总长度: {chapter_context.context_stats.get('total_length', 0)} 字符")
             
                 yield await tracker.loading("上下文构建完成", 0.8)
                 
@@ -1423,102 +1413,91 @@ async def generate_chapter_content_stream(
                 )
                 logger.info(f"📝 使用叙事人称: {chapter_perspective}")
                 
-                # 📋 根据大纲模式构建差异化的章节大纲上下文
-                chapter_outline_content = ""
+                # 🚀 根据大纲模式选择提示词模板和参数
                 if outline_mode == 'one-to-one':
-                    # 一对一模式：使用大纲的 content
-                    chapter_outline_content = outline.content if outline else current_chapter.summary or '暂无大纲'
-                    logger.info(f"✏️ 一对一模式：使用大纲内容作为章节指导")
-                else:
-                    # 一对多模式：优先使用 expansion_plan 的详细规划
-                    if current_chapter.expansion_plan:
-                        try:
-                            plan = json.loads(current_chapter.expansion_plan)
-                            chapter_outline_content = f"""【本章详细规划】
-剧情摘要：{plan.get('plot_summary', '无')}
-
-关键事件：
-{chr(10).join(f'- {event}' for event in plan.get('key_events', []))}
-
-角色焦点：{', '.join(plan.get('character_focus', []))}
-
-情感基调：{plan.get('emotional_tone', '未设定')}
-
-叙事目标：{plan.get('narrative_goal', '未设定')}
-
-冲突类型：{plan.get('conflict_type', '未设定')}"""
-                            
-                            # 可选：附加章节 summary
-                            if current_chapter.summary and current_chapter.summary.strip():
-                                chapter_outline_content += f"\n\n【章节补充说明】\n{current_chapter.summary}"
-                            
-                            # 可选：附加大纲的背景信息（限制长度，避免喧宾夺主）
-                            if outline:
-                                outline_bg = outline.content
-                                if len(outline_bg) > 200:
-                                    outline_bg = outline_bg[:200] + "..."
-                                chapter_outline_content += f"\n\n【大纲节点背景】\n{outline_bg}"
-                            
-                            logger.info(f"✏️ 一对多模式：使用expansion_plan详细规划（{len(chapter_outline_content)}字符）")
-                        except json.JSONDecodeError as e:
-                            logger.warning(f"⚠️ expansion_plan解析失败: {e}，回退到大纲内容")
-                            chapter_outline_content = outline.content if outline else current_chapter.summary or '暂无大纲'
+                    # 1-1模式
+                    if chapter_context.continuation_point:
+                        # 有上一章内容
+                        template = await PromptService.get_template("CHAPTER_GENERATION_ONE_TO_ONE_NEXT", current_user_id, db_session)
+                        base_prompt = PromptService.format_prompt(
+                            template,
+                            project_title=project.title,
+                            chapter_number=current_chapter.chapter_number,
+                            chapter_title=current_chapter.title,
+                            chapter_outline=chapter_context.chapter_outline,
+                            target_word_count=target_word_count,
+                            genre=project.genre or '未设定',
+                            narrative_perspective=chapter_perspective,
+                            previous_chapter_content=chapter_context.continuation_point,
+                            characters_info=chapter_context.chapter_characters or '暂无角色信息',
+                            chapter_careers=chapter_context.chapter_careers or '暂无职业信息',
+                            foreshadow_reminders=chapter_context.foreshadow_reminders or '暂无需要关注的伏笔',
+                            relevant_memories=chapter_context.relevant_memories or '暂无相关记忆'
+                        )
+                        logger.debug(f"创建第{current_chapter.chapter_number}章提示词: {base_prompt}")
                     else:
-                        # 没有expansion_plan，使用大纲内容
-                        chapter_outline_content = outline.content if outline else current_chapter.summary or '暂无大纲'
-                        logger.warning(f"⚠️ 一对多模式但无expansion_plan，使用大纲内容")
-                
-                # 🚀 使用 V2 优化模板构建提示词
-                if chapter_context.continuation_point:
-                    # 有前置内容，使用 WITH_CONTEXT 模板
-                    
-                    # 尝试从context中提取上一章摘要
-                    previous_summary = "（无上一章摘要，请根据锚点续写）"
-                    if chapter_context.context_stats.get('recent_summaries', 0) > 0:
-                        # 简单的提取逻辑，实际可能需要更精确的解析
-                        # 但在这里，context_stats并没有直接存储内容。
-                        # 我们利用ChapterContext对象中可能存在的summary信息，或者直接从recent_summary文本中截取最后一段
-                        if hasattr(chapter_context, 'recent_summary') and chapter_context.recent_summary:
-                            lines = chapter_context.recent_summary.strip().split('\n')
-                            if lines:
-                                previous_summary = lines[-1]
-                    
-                    template = await PromptService.get_template("CHAPTER_GENERATION_V2_WITH_CONTEXT", current_user_id, db_session)
-                    base_prompt = PromptService.format_prompt(
-                        template,
-                        # P0 核心参数
-                        project_title=project.title,
-                        chapter_number=current_chapter.chapter_number,
-                        chapter_title=current_chapter.title,
-                        chapter_outline=chapter_outline_content,
-                        target_word_count=target_word_count,
-                        continuation_point=chapter_context.continuation_point,
-                        # P1 重要参数
-                        genre=project.genre or '未设定',
-                        narrative_perspective=chapter_perspective,
-                        characters_info=characters_info or '暂无角色信息',
-                        foreshadow_reminders=chapter_context.foreshadow_reminders or '暂无需要关注的伏笔',
-                        previous_chapter_summary=previous_summary,
-                        # P2 参考参数（动态裁剪后的）
-                        story_skeleton=chapter_context.story_skeleton or '',
-                        relevant_memories=chapter_context.relevant_memories or ''
-                    )
+                        # 第一章
+                        template = await PromptService.get_template("CHAPTER_GENERATION_ONE_TO_ONE", current_user_id, db_session)
+                        base_prompt = PromptService.format_prompt(
+                            template,
+                            project_title=project.title,
+                            chapter_number=current_chapter.chapter_number,
+                            chapter_title=current_chapter.title,
+                            chapter_outline=chapter_context.chapter_outline,
+                            target_word_count=target_word_count,
+                            genre=project.genre or '未设定',
+                            narrative_perspective=chapter_perspective,
+                            characters_info=chapter_context.chapter_characters or '暂无角色信息',
+                            chapter_careers=chapter_context.chapter_careers or '暂无职业信息',
+                            foreshadow_reminders=chapter_context.foreshadow_reminders or '暂无需要关注的伏笔',
+                            relevant_memories=chapter_context.relevant_memories or '暂无相关记忆'
+                        )
+                        logger.debug(f"创建第一章提示词: {base_prompt}")
                 else:
-                    # 第一章，使用无前置内容模板
-                    template = await PromptService.get_template("CHAPTER_GENERATION_V2", current_user_id, db_session)
-                    base_prompt = PromptService.format_prompt(
-                        template,
-                        # P0 核心参数
-                        project_title=project.title,
-                        chapter_number=current_chapter.chapter_number,
-                        chapter_title=current_chapter.title,
-                        chapter_outline=chapter_outline_content,
-                        target_word_count=target_word_count,
-                        # P1 重要参数
-                        genre=project.genre or '未设定',
-                        narrative_perspective=chapter_perspective,
-                        characters_info=characters_info or '暂无角色信息'
-                    )
+                    # ========== 1-n模式：使用完整模板 ==========
+                    if chapter_context.continuation_point:
+                        # 有前置内容，使用 WITH_CONTEXT 模板
+                        logger.info(f"📝 [1-n模式] 使用带上下文的模板（第{current_chapter.chapter_number}章）")
+                        
+                        # 提取上一章摘要
+                        previous_summary = "（无上一章摘要，请根据锚点续写）"
+                        if chapter_context.previous_chapter_summary:
+                            previous_summary = chapter_context.previous_chapter_summary
+                        
+                        template = await PromptService.get_template("CHAPTER_GENERATION_ONE_TO_MANY_NEXT", current_user_id, db_session)
+                        base_prompt = PromptService.format_prompt(
+                            template,
+                            project_title=project.title,
+                            chapter_number=current_chapter.chapter_number,
+                            chapter_title=current_chapter.title,
+                            chapter_outline=chapter_context.chapter_outline,
+                            target_word_count=target_word_count,
+                            continuation_point=chapter_context.continuation_point,
+                            genre=project.genre or '未设定',
+                            narrative_perspective=chapter_perspective,
+                            characters_info=chapter_context.chapter_characters or '暂无角色信息',
+                            foreshadow_reminders=chapter_context.foreshadow_reminders or '暂无需要关注的伏笔',
+                            previous_chapter_summary=previous_summary,
+                            story_skeleton=chapter_context.story_skeleton or '',
+                            relevant_memories=chapter_context.relevant_memories or ''
+                        )
+                        logger.debug(f"创建第{current_chapter.chapter_number}章提示词: {base_prompt}")
+                    else:
+                        # 第1章，使用无前置内容模板
+                        logger.info(f"📝 [1-n模式] 使用第一章模板")
+                        template = await PromptService.get_template("CHAPTER_GENERATION_ONE_TO_MANY", current_user_id, db_session)
+                        base_prompt = PromptService.format_prompt(
+                            template,
+                            project_title=project.title,
+                            chapter_number=current_chapter.chapter_number,
+                            chapter_title=current_chapter.title,
+                            chapter_outline=chapter_context.chapter_outline,
+                            target_word_count=target_word_count,
+                            genre=project.genre or '未设定',
+                            narrative_perspective=chapter_perspective,
+                            characters_info=chapter_context.chapter_characters or '暂无角色信息'
+                        )
+                        logger.debug(f"创建第一章提示词: {base_prompt}")
                 
                 # 应用写作风格
                 if style_content:
@@ -2687,18 +2666,6 @@ async def generate_single_chapter_for_batch(
     )
     outline = outline_result.scalar_one_or_none()
     
-    # 获取所有大纲用于上下文
-    all_outlines_result = await db_session.execute(
-        select(Outline)
-        .where(Outline.project_id == chapter.project_id)
-        .order_by(Outline.order_index)
-    )
-    all_outlines = all_outlines_result.scalars().all()
-    outlines_context = "\n".join([
-        f"第{o.order_index}章 {o.title}: {o.content[:100]}..."
-        for o in all_outlines
-    ])
-    
     # 获取角色信息（包含职业信息）
     characters_result = await db_session.execute(
         select(Character).where(Character.project_id == chapter.project_id)
@@ -2746,16 +2713,38 @@ async def generate_single_chapter_for_batch(
             if style.user_id is None or style.user_id == user_id:
                 style_content = style.prompt_content or ""
     
-    # 🚀 使用新的优化上下文构建器（含伏笔服务）
-    logger.info(f"🔧 批量生成 - 使用优化的章节上下文构建器（V2 + 伏笔提醒）")
-    context_builder = ChapterContextBuilder(foreshadow_service=foreshadow_service)
-    chapter_context = await context_builder.build(
-        chapter=chapter,
-        project=project,
-        outline=outline,
-        user_id=user_id,
-        db=db_session
-    )
+    # 🚀 根据大纲模式选择独立的上下文构建器（批量生成）
+    if outline_mode == 'one-to-one':
+        # 1-1模式
+        logger.info(f"🔧 批量生成 - [1-1模式] 使用 OneToOneContextBuilder")
+        context_builder = OneToOneContextBuilder(
+            memory_service=memory_service,
+            foreshadow_service=foreshadow_service
+        )
+        chapter_context = await context_builder.build(
+            chapter=chapter,
+            project=project,
+            outline=outline,
+            user_id=user_id,
+            db=db_session,
+            target_word_count=target_word_count
+        )
+    else:
+        # 1-N模式：使用独立的完整构建器
+        logger.info(f"🔧 批量生成 - [1-N模式] 使用 OneToManyContextBuilder")
+        context_builder = OneToManyContextBuilder(
+            memory_service=memory_service,
+            foreshadow_service=foreshadow_service
+        )
+        chapter_context = await context_builder.build(
+            chapter=chapter,
+            project=project,
+            outline=outline,
+            user_id=user_id,
+            db=db_session,
+            style_content=style_content,
+            target_word_count=target_word_count
+        )
     
     # 日志输出统计信息
     logger.info(f"📊 批量生成 - 优化上下文统计:")
@@ -2809,57 +2798,88 @@ async def generate_single_chapter_for_batch(
             chapter_outline_content = outline.content if outline else chapter.summary or '暂无大纲'
             logger.warning(f"⚠️ 批量生成 - 一对多模式但无expansion_plan，使用大纲内容")
     
-    # 🚀 使用 V2 优化模板构建提示词（批量生成）
-    if chapter_context.continuation_point:
-        # 有前置内容，使用 WITH_CONTEXT 模板
-        
-        # 确定上一章摘要：优先使用传入的 previous_summary_context（批量生成的上一章），
-        # 否则尝试从 chapter_context 中获取
-        final_prev_summary = "（无上一章摘要，请根据锚点续写）"
-        
-        if previous_summary_context:
-            final_prev_summary = previous_summary_context
-        elif hasattr(chapter_context, 'recent_summary') and chapter_context.recent_summary:
-            lines = chapter_context.recent_summary.strip().split('\n')
-            if lines:
-                final_prev_summary = lines[-1]
-                
-        template = await PromptService.get_template("CHAPTER_GENERATION_V2_WITH_CONTEXT", user_id, db_session)
-        base_prompt = PromptService.format_prompt(
-            template,
-            # P0 核心参数
-            project_title=project.title,
-            chapter_number=chapter.chapter_number,
-            chapter_title=chapter.title,
-            chapter_outline=chapter_outline_content,
-            target_word_count=target_word_count,
-            continuation_point=chapter_context.continuation_point,
-            # P1 重要参数
-            genre=project.genre or '未设定',
-            narrative_perspective=project.narrative_perspective or '第三人称',
-            characters_info=characters_info or '暂无角色信息',
-            foreshadow_reminders=chapter_context.foreshadow_reminders or '暂无需要关注的伏笔',
-            previous_chapter_summary=final_prev_summary,
-            # P2 参考参数（动态裁剪后的）
-            story_skeleton=chapter_context.story_skeleton or '',
-            relevant_memories=chapter_context.relevant_memories or ''
-        )
+    # 🚀 根据大纲模式选择提示词模板（批量生成）
+    if outline_mode == 'one-to-one':
+        # 1-1模式
+        if chapter_context.continuation_point:
+            # 有上一章内容
+            template = await PromptService.get_template("CHAPTER_GENERATION_ONE_TO_ONE_NEXT", user_id, db_session)
+            base_prompt = PromptService.format_prompt(
+                template,
+                project_title=project.title,
+                chapter_number=chapter.chapter_number,
+                chapter_title=chapter.title,
+                chapter_outline=chapter_context.chapter_outline,
+                target_word_count=target_word_count,
+                genre=project.genre or '未设定',
+                narrative_perspective=project.narrative_perspective or '第三人称',
+                previous_chapter_content=chapter_context.continuation_point,
+                characters_info=chapter_context.chapter_characters or '暂无角色信息',
+                chapter_careers=chapter_context.chapter_careers or '暂无职业信息',
+                foreshadow_reminders=chapter_context.foreshadow_reminders or '暂无需要关注的伏笔',
+                relevant_memories=chapter_context.relevant_memories or '暂无相关记忆'
+            )
+        else:
+            # 第一章
+            template = await PromptService.get_template("CHAPTER_GENERATION_ONE_TO_ONE", user_id, db_session)
+            base_prompt = PromptService.format_prompt(
+                template,
+                project_title=project.title,
+                chapter_number=chapter.chapter_number,
+                chapter_title=chapter.title,
+                chapter_outline=chapter_context.chapter_outline,
+                target_word_count=target_word_count,
+                genre=project.genre or '未设定',
+                narrative_perspective=project.narrative_perspective or '第三人称',
+                characters_info=chapter_context.chapter_characters or '暂无角色信息',
+                chapter_careers=chapter_context.chapter_careers or '暂无职业信息',
+                foreshadow_reminders=chapter_context.foreshadow_reminders or '暂无需要关注的伏笔',
+                relevant_memories=chapter_context.relevant_memories or '暂无相关记忆'
+            )
     else:
-        # 第一章，使用无前置内容模板
-        template = await PromptService.get_template("CHAPTER_GENERATION_V2", user_id, db_session)
-        base_prompt = PromptService.format_prompt(
-            template,
-            # P0 核心参数
-            project_title=project.title,
-            chapter_number=chapter.chapter_number,
-            chapter_title=chapter.title,
-            chapter_outline=chapter_outline_content,
-            target_word_count=target_word_count,
-            # P1 重要参数
-            genre=project.genre or '未设定',
-            narrative_perspective=project.narrative_perspective or '第三人称',
-            characters_info=characters_info or '暂无角色信息'
-        )
+        # 1-n模式：使用原有的完整模板
+        if chapter_context.continuation_point:
+            # 有前置内容，使用 WITH_CONTEXT 模板
+            final_prev_summary = "（无上一章摘要，请根据锚点续写）"
+            
+            if previous_summary_context:
+                final_prev_summary = previous_summary_context
+            elif hasattr(chapter_context, 'recent_summary') and chapter_context.recent_summary:
+                lines = chapter_context.recent_summary.strip().split('\n')
+                if lines:
+                    final_prev_summary = lines[-1]
+                    
+            template = await PromptService.get_template("CHAPTER_GENERATION_ONE_TO_MANY_NEXT", user_id, db_session)
+            base_prompt = PromptService.format_prompt(
+                template,
+                project_title=project.title,
+                chapter_number=chapter.chapter_number,
+                chapter_title=chapter.title,
+                chapter_outline=chapter_outline_content,
+                target_word_count=target_word_count,
+                continuation_point=chapter_context.continuation_point,
+                genre=project.genre or '未设定',
+                narrative_perspective=project.narrative_perspective or '第三人称',
+                characters_info=characters_info or '暂无角色信息',
+                foreshadow_reminders=chapter_context.foreshadow_reminders or '暂无需要关注的伏笔',
+                previous_chapter_summary=final_prev_summary,
+                story_skeleton=chapter_context.story_skeleton or '',
+                relevant_memories=chapter_context.relevant_memories or ''
+            )
+        else:
+            # 第一章，使用无前置内容模板
+            template = await PromptService.get_template("CHAPTER_GENERATION_ONE_TO_MANY", user_id, db_session)
+            base_prompt = PromptService.format_prompt(
+                template,
+                project_title=project.title,
+                chapter_number=chapter.chapter_number,
+                chapter_title=chapter.title,
+                chapter_outline=chapter_outline_content,
+                target_word_count=target_word_count,
+                genre=project.genre or '未设定',
+                narrative_perspective=project.narrative_perspective or '第三人称',
+                characters_info=characters_info or '暂无角色信息'
+            )
     
     # 应用写作风格
     if style_content:

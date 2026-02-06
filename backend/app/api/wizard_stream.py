@@ -355,6 +355,7 @@ async def career_system_generator(
             title=project.title,
             genre=project.genre or '未设定',
             theme=project.theme or '未设定',
+            description=project.description or '暂无简介',
             time_period=world_data.get('time_period', '未设定'),
             location=world_data.get('location', '未设定'),
             atmosphere=world_data.get('atmosphere', '未设定'),

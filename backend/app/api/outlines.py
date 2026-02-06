@@ -129,7 +129,7 @@ async def get_outlines(
     request: Request,
     db: AsyncSession = Depends(get_db)
 ):
-    """获取指定项目的所有大纲"""
+    """获取指定项目的所有大纲（优化版：后端完全解析structure，构建标准JSON返回）"""
     # 验证用户权限
     user_id = getattr(request.state, 'user_id', None)
     await verify_project_access(project_id, user_id, db)
@@ -147,6 +147,27 @@ async def get_outlines(
         .order_by(Outline.order_index)
     )
     outlines = result.scalars().all()
+    
+    # 🔧 优化：后端完全解析structure，提取所有字段填充到outline对象
+    for outline in outlines:
+        if outline.structure:
+            try:
+                structure_data = json.loads(outline.structure)
+                
+                # 从structure中提取所有字段填充到outline对象
+                outline.title = structure_data.get("title", f"第{outline.order_index}章")
+                outline.content = structure_data.get("summary") or structure_data.get("content", "")
+                
+                # structure字段保持不变，供前端使用其他字段（如characters、scenes等）
+                
+            except json.JSONDecodeError:
+                logger.warning(f"解析大纲 {outline.id} 的structure失败")
+                outline.title = f"第{outline.order_index}章"
+                outline.content = "解析失败"
+        else:
+            # 没有structure的异常情况
+            outline.title = f"第{outline.order_index}章"
+            outline.content = "暂无内容"
     
     return OutlineListResponse(total=total, items=outlines)
 
@@ -205,11 +226,24 @@ async def update_outline(
     
     # 更新字段
     update_data = outline_update.model_dump(exclude_unset=True)
+    
+    # 🔧 特殊处理：如果直接传递了structure字段，优先使用它
+    if 'structure' in update_data:
+        # 直接使用前端传递的structure（前端已经处理好了完整的JSON）
+        outline.structure = update_data['structure']
+        logger.info(f"直接更新大纲 {outline_id} 的structure字段")
+        # 从update_data中移除structure，避免后续重复处理
+        structure_updated = True
+        del update_data['structure']
+    else:
+        structure_updated = False
+    
+    # 更新其他字段
     for field, value in update_data.items():
         setattr(outline, field, value)
     
-    # 如果修改了content或title，同步更新structure字段
-    if 'content' in update_data or 'title' in update_data:
+    # 如果没有直接更新structure，但修改了content或title，则同步更新structure字段
+    if not structure_updated and ('content' in update_data or 'title' in update_data):
         try:
             # 尝试解析现有的structure
             if outline.structure:
@@ -605,752 +639,215 @@ async def predict_organizations(
         raise HTTPException(status_code=500, detail=f"组织预测失败: {str(e)}")
 
 
-
-async def _generate_new_outline(
-    request: OutlineGenerateRequest,
+async def _build_outline_continue_context(
     project: Project,
-    db: AsyncSession,
-    user_ai_service: AIService,
-    user_id: str
-) -> OutlineListResponse:
-    """全新生成大纲（MCP增强版）"""
-    logger.info(f"全新生成大纲 - 项目: {project.id}, enable_mcp: {request.enable_mcp}")
-    
-    # 获取角色信息
-    characters_result = await db.execute(
-        select(Character).where(Character.project_id == project.id)
-    )
-    characters = characters_result.scalars().all()
-    characters_info = _build_characters_info(characters)
-    
-    # 设置用户信息以启用MCP
-    if user_id:
-        user_ai_service.user_id = user_id
-        user_ai_service.db_session = db
-    
-    # 使用提示词模板
-    template = await PromptService.get_template("OUTLINE_CREATE", user_id, db)
-    prompt = PromptService.format_prompt(
-        template,
-        title=project.title,
-        theme=request.theme or project.theme or "未设定",
-        genre=request.genre or project.genre or "通用",
-        chapter_count=request.chapter_count,
-        narrative_perspective=request.narrative_perspective,
-        target_words=request.target_words,
-        time_period=project.world_time_period or "未设定",
-        location=project.world_location or "未设定",
-        atmosphere=project.world_atmosphere or "未设定",
-        rules=project.world_rules or "未设定",
-        characters_info=characters_info or "暂无角色信息",
-        requirements=request.requirements or "",
-        mcp_references=""
-    )
-    
-    # 调用AI流式生成大纲（带字数统计）
-    accumulated_text = ""
-    chunk_count = 0
-    
-    async for chunk in user_ai_service.generate_text_stream(
-        prompt=prompt,
-        provider=request.provider,
-        model=request.model,
-        auto_mcp=request.enable_mcp
-    ):
-        chunk_count += 1
-        accumulated_text += chunk
-        
-        # 这里是非SSE接口，不需要发送chunk
-        # 如果未来需要转SSE，可以在这里yield
-    
-    ai_content = accumulated_text
-    ai_response = {"content": ai_content}
-    
-    # 解析响应
-    outline_data = _parse_ai_response(ai_content)
-    
-    # 全新生成模式：删除旧大纲和关联的所有章节
-    logger.info(f"全新生成：删除项目 {project.id} 的旧大纲和章节（outline_mode: {project.outline_mode}）")
-    
-    # 清理伏笔数据
-    try:
-        await foreshadow_service.clear_project_foreshadows_for_reset(db, project.id)
-    except Exception as e:
-        logger.warning(f"清理伏笔数据失败（不影响主流程）: {str(e)}")
-
-    from sqlalchemy import delete as sql_delete
-    
-    # 先获取所有旧章节并计算总字数
-    old_chapters_result = await db.execute(
-        select(Chapter).where(Chapter.project_id == project.id)
-    )
-    old_chapters = old_chapters_result.scalars().all()
-    deleted_word_count = sum(ch.word_count or 0 for ch in old_chapters)
-    
-    # 删除所有旧章节（无论是一对一还是一对多模式）
-    delete_result = await db.execute(
-        sql_delete(Chapter).where(Chapter.project_id == project.id)
-    )
-    deleted_chapters_count = delete_result.rowcount
-    logger.info(f"✅ 全新生成：删除了 {deleted_chapters_count} 个旧章节（{deleted_word_count}字）")
-    
-    # 更新项目字数
-    if deleted_word_count > 0:
-        project.current_words = max(0, project.current_words - deleted_word_count)
-        logger.info(f"更新项目字数：减少 {deleted_word_count} 字")
-    
-    # 再删除所有旧大纲
-    delete_outline_result = await db.execute(
-        sql_delete(Outline).where(Outline.project_id == project.id)
-    )
-    deleted_outlines_count = delete_outline_result.rowcount
-    logger.info(f"✅ 全新生成：删除了 {deleted_outlines_count} 个旧大纲")
-    
-    # 保存新大纲
-    outlines = await _save_outlines(
-        project.id, outline_data, db, start_index=1
-    )
-    
-    # 记录历史
-    history = GenerationHistory(
-        project_id=project.id,
-        prompt=prompt,
-        generated_content=json.dumps(ai_response, ensure_ascii=False) if isinstance(ai_response, dict) else ai_response,
-        model=request.model or "default"
-    )
-    db.add(history)
-    
-    await db.commit()
-    
-    for outline in outlines:
-        await db.refresh(outline)
-    
-    logger.info(f"全新生成完成 - {len(outlines)} 章")
-    return OutlineListResponse(total=len(outlines), items=outlines)
-
-
-async def _build_smart_outline_context(
     latest_outlines: List[Outline],
-    user_id: str,
-    project_id: str
+    characters: List[Character],
+    chapter_count: int,
+    plot_stage: str,
+    story_direction: str,
+    requirements: str,
+    db: AsyncSession
 ) -> dict:
     """
-    智能构建大纲续写上下文（支持海量大纲场景）
+    构建大纲续写上下文（简化版）
     
-    策略：
-    1. 故事骨架：每50章采样1章（仅标题）
-    2. 近期概要：最近20章（标题+简要）
-    3. 最近详细：最近2章（完整内容）
+    包含内容：
+    1. 项目基础信息：title, theme, genre, world_time_period, world_location,
+       world_atmosphere, world_rules, narrative_perspective
+    2. 最近10章的完整大纲structure（解析JSON转化为文本）
+    3. 所有角色的全部信息
+    4. 用户输入：chapter_count, plot_stage, story_direction, requirements
     
     Args:
+        project: 项目对象
         latest_outlines: 所有已有大纲列表
-        user_id: 用户ID
-        project_id: 项目ID
+        characters: 所有角色列表
+        chapter_count: 要生成的章节数
+        plot_stage: 情节阶段
+        story_direction: 故事发展方向
+        requirements: 其他要求
         
     Returns:
-        包含压缩后上下文的字典
+        包含上下文信息的字典
     """
-    total_count = len(latest_outlines)
-    
     context = {
-        'story_skeleton': '',      # 故事骨架（标题列表）
-        'recent_summary': '',      # 近期概要（标题+内容前50字）
-        'recent_detail': '',       # 最近详细（完整内容）
+        'project_info': '',
+        'recent_outlines': '',
+        'characters_info': '',
+        'user_input': '',
         'stats': {
-            'total': total_count,
-            'skeleton_samples': 0,
-            'recent_summaries': 0,
-            'recent_details': 0
+            'total_outlines': len(latest_outlines),
+            'recent_outlines_count': 0,
+            'characters_count': len(characters)
         }
     }
     
     try:
-        # 1. 故事骨架（每50章采样，仅标题）
-        if total_count > 50:
-            sample_interval = 50
-            skeleton_indices = list(range(0, total_count, sample_interval))
-            skeleton_titles = [
-                f"第{latest_outlines[idx].order_index}章: {latest_outlines[idx].title}"
-                for idx in skeleton_indices
-            ]
-            context['story_skeleton'] = "【故事骨架】\n" + "\n".join(skeleton_titles)
-            context['stats']['skeleton_samples'] = len(skeleton_titles)
-            logger.info(f"  ✅ 故事骨架：采样{len(skeleton_titles)}章标题")
-        
-        # 2. 近期概要（最近20章，标题+内容前50字）
-        recent_summary_count = min(20, total_count)
-        if recent_summary_count > 2:  # 排除最后2章（它们会完整展示）
-            recent_for_summary = latest_outlines[-recent_summary_count:-2]
-            recent_summaries = [
-                f"第{o.order_index}章《{o.title}》: {o.content[:50]}..."
-                for o in recent_for_summary
-            ]
-            context['recent_summary'] = "【近期大纲概要】\n" + "\n".join(recent_summaries)
-            context['stats']['recent_summaries'] = len(recent_summaries)
-            logger.info(f"  ✅ 近期概要：{len(recent_summaries)}章")
-        
-        # 3. 最近详细（最近2章，完整内容）
-        recent_detail_count = min(2, total_count)
-        recent_details = latest_outlines[-recent_detail_count:]
-        detail_texts = [
-            f"第{o.order_index}章《{o.title}》: {o.content}"
-            for o in recent_details
+        # 1. 项目基础信息
+        project_info_parts = [
+            f"【项目基础信息】",
+            f"标题：{project.title}",
+            f"主题：{project.theme or '未设定'}",
+            f"类型：{project.genre or '未设定'}",
+            f"时代背景：{project.world_time_period or '未设定'}",
+            f"地点设定：{project.world_location or '未设定'}",
+            f"氛围基调：{project.world_atmosphere or '未设定'}",
+            f"世界规则：{project.world_rules or '未设定'}",
+            f"叙事视角：{project.narrative_perspective or '第三人称'}"
         ]
-        context['recent_detail'] = "【最近大纲详情】\n" + "\n".join(detail_texts)
-        context['stats']['recent_details'] = len(detail_texts)
-        logger.info(f"  ✅ 最近详细：{len(detail_texts)}章")
+        context['project_info'] = "\n".join(project_info_parts)
+        
+        # 2. 最近10章的完整大纲structure（解析JSON转化为文本）
+        recent_count = min(10, len(latest_outlines))
+        if recent_count > 0:
+            recent_outlines = latest_outlines[-recent_count:]
+            context['stats']['recent_outlines_count'] = recent_count
+            
+            outline_texts = []
+            outline_texts.append(f"【最近{recent_count}章大纲详情】")
+            
+            for outline in recent_outlines:
+                outline_text = f"\n第{outline.order_index}章《{outline.title}》"
+                
+                # 尝试解析structure字段
+                if outline.structure:
+                    try:
+                        structure_data = json.loads(outline.structure)
+                        
+                        # 提取各个字段（使用实际存储的字段名）
+                        if structure_data.get('summary'):
+                            outline_text += f"\n  概要：{structure_data['summary']}"
+                        
+                        # key_points 对应 关键事件
+                        if structure_data.get('key_points'):
+                            events = structure_data['key_points']
+                            if isinstance(events, list):
+                                outline_text += f"\n  关键事件：{', '.join(events)}"
+                            else:
+                                outline_text += f"\n  关键事件：{events}"
+                        
+                        # characters 对应 重点角色
+                        if structure_data.get('characters'):
+                            chars = structure_data['characters']
+                            if isinstance(chars, list):
+                                outline_text += f"\n  重点角色：{', '.join(chars)}"
+                            else:
+                                outline_text += f"\n  重点角色：{chars}"
+                        
+                        # emotion 对应 情感基调
+                        if structure_data.get('emotion'):
+                            outline_text += f"\n  情感基调：{structure_data['emotion']}"
+                        
+                        # goal 对应 叙事目标
+                        if structure_data.get('goal'):
+                            outline_text += f"\n  叙事目标：{structure_data['goal']}"
+                        
+                        # scenes 场景信息（可选显示）
+                        if structure_data.get('scenes'):
+                            scenes = structure_data['scenes']
+                            if isinstance(scenes, list) and scenes:
+                                outline_text += f"\n  场景：{', '.join(scenes)}"
+                            
+                    except json.JSONDecodeError:
+                        # 如果解析失败，使用content字段
+                        outline_text += f"\n  内容：{outline.content}"
+                else:
+                    # 没有structure，使用content
+                    outline_text += f"\n  内容：{outline.content}"
+                
+                outline_texts.append(outline_text)
+            
+            context['recent_outlines'] = "\n".join(outline_texts)
+            logger.info(f"  ✅ 最近大纲：{recent_count}章")
+        
+        # 3. 所有角色的全部信息(包括职业信息)
+        if characters:
+            from app.models.career import Career, CharacterCareer
+            
+            char_texts = []
+            char_texts.append("【角色信息】")
+            
+            for char in characters:
+                char_text = f"\n{char.name}（{'组织' if char.is_organization else '角色'}，{char.role_type}）"
+                
+                if char.personality:
+                    char_text += f"\n  性格特点：{char.personality}"
+                
+                if char.background:
+                    char_text += f"\n  背景故事：{char.background}"
+                
+                if char.appearance:
+                    char_text += f"\n  外貌描述：{char.appearance}"
+                
+                if char.traits:
+                    char_text += f"\n  特征标签：{char.traits}"
+                
+                if char.relationships:
+                    char_text += f"\n  关系网络：{char.relationships}"
+                
+                # 组织特有字段
+                if char.is_organization:
+                    if char.organization_type:
+                        char_text += f"\n  组织类型：{char.organization_type}"
+                    if char.organization_purpose:
+                        char_text += f"\n  组织宗旨：{char.organization_purpose}"
+                    if char.organization_members:
+                        char_text += f"\n  组织成员：{char.organization_members}"
+                
+                # 查询角色的职业信息
+                if not char.is_organization:
+                    try:
+                        career_result = await db.execute(
+                            select(Career, CharacterCareer)
+                            .join(CharacterCareer, Career.id == CharacterCareer.career_id)
+                            .where(CharacterCareer.character_id == char.id)
+                        )
+                        career_data = career_result.first()
+                        
+                        if career_data:
+                            career, char_career = career_data
+                            char_text += f"\n  职业：{career.name}"
+                            if char_career.current_stage:
+                                char_text += f"（{char_career.current_stage}阶段）"
+                            if char_career.career_type:
+                                char_text += f"\n  职业类型：{char_career.career_type}"
+                    except Exception as e:
+                        logger.warning(f"查询角色 {char.name} 的职业信息失败: {str(e)}")
+                
+                char_texts.append(char_text)
+            
+            context['characters_info'] = "\n".join(char_texts)
+            logger.info(f"  ✅ 角色信息：{len(characters)}个角色")
+        else:
+            context['characters_info'] = "【角色信息】\n暂无角色信息"
+        
+        # 4. 用户输入
+        user_input_parts = [
+            "【用户输入】",
+            f"要生成章节数：{chapter_count}章",
+            f"情节阶段：{plot_stage}",
+            f"故事发展方向：{story_direction}",
+        ]
+        if requirements:
+            user_input_parts.append(f"其他要求：{requirements}")
+        
+        context['user_input'] = "\n".join(user_input_parts)
         
         # 计算总长度
         total_length = sum([
-            len(context['story_skeleton']),
-            len(context['recent_summary']),
-            len(context['recent_detail'])
+            len(context['project_info']),
+            len(context['recent_outlines']),
+            len(context['characters_info']),
+            len(context['user_input'])
         ])
         context['stats']['total_length'] = total_length
-        logger.info(f"📊 大纲上下文总长度: {total_length} 字符")
+        logger.info(f"📊 大纲续写上下文总长度: {total_length} 字符")
         
     except Exception as e:
-        logger.error(f"❌ 构建智能大纲上下文失败: {str(e)}", exc_info=True)
+        logger.error(f"❌ 构建大纲续写上下文失败: {str(e)}", exc_info=True)
     
     return context
-
-
-async def _continue_outline(
-    request: OutlineGenerateRequest,
-    project: Project,
-    existing_outlines: List[Outline],
-    db: AsyncSession,
-    user_ai_service: AIService,
-    user_id: str
-) -> OutlineListResponse:
-    """续写大纲 - 分批生成，每批5章（记忆+MCP+自动角色引入增强版）"""
-    logger.info(f"续写大纲 - 项目: {project.id}, 已有: {len(existing_outlines)} 章, enable_mcp: {request.enable_mcp}, enable_auto_characters: {request.enable_auto_characters}")
-    
-    # 分析已有大纲
-    current_chapter_count = len(existing_outlines)
-    last_chapter_number = existing_outlines[-1].order_index
-    
-    # 计算需要生成的总章数和批次
-    total_chapters_to_generate = request.chapter_count
-    batch_size = 5  # 每批生成5章
-    total_batches = (total_chapters_to_generate + batch_size - 1) // batch_size
-    
-    logger.info(f"分批生成计划: 总共{total_chapters_to_generate}章，分{total_batches}批，每批{batch_size}章")
-    
-    # 获取角色信息（所有批次共用）
-    characters_result = await db.execute(
-        select(Character).where(Character.project_id == project.id)
-    )
-    characters = characters_result.scalars().all()
-    characters_info = _build_characters_info(characters)
-    
-    # 情节阶段指导
-    stage_instructions = {
-        "development": "继续展开情节，深化角色关系，推进主线冲突",
-        "climax": "进入故事高潮，矛盾激化，关键冲突爆发",
-        "ending": "解决主要冲突，收束伏笔，给出结局"
-    }
-    stage_instruction = stage_instructions.get(request.plot_stage, "")
-    
-    # 🎭 【方案A】先角色后大纲：在生成大纲前预测并创建角色
-    # 🔧 判断：如果confirmed_organizations存在，说明已经是组织确认阶段，跳过角色处理
-    if request.enable_auto_characters and not request.confirmed_organizations:
-        # 检查是否有用户确认的角色列表
-        if request.confirmed_characters:
-            # 直接使用用户确认的角色列表创建角色
-            try:
-                from app.services.auto_character_service import get_auto_character_service
-                
-                logger.info(f"🎭 【确认模式】用户提供了 {len(request.confirmed_characters)} 个确认的角色，直接创建")
-                
-                auto_char_service = get_auto_character_service(user_ai_service)
-                
-                # 🔧 去重检查：获取现有角色名称列表，避免重复创建
-                existing_character_names = {char.name for char in characters}
-                actually_created_count = 0
-                
-                for char_data in request.confirmed_characters:
-                    try:
-                        # 检查角色是否已存在
-                        char_name = char_data.get("name") or char_data.get("character_name")
-                        if char_name in existing_character_names:
-                            logger.warning(f"⚠️ 角色 '{char_name}' 已存在，跳过创建")
-                            continue
-                        
-                        # 生成角色详细信息
-                        character_data = await auto_char_service._generate_character_details(
-                            spec=char_data,
-                            project=project,
-                            existing_characters=list(characters),
-                            db=db,
-                            user_id=user_id,
-                            enable_mcp=request.enable_mcp
-                        )
-                        
-                        # 创建角色记录
-                        character = await auto_char_service._create_character_record(
-                            project_id=project.id,
-                            character_data=character_data,
-                            db=db
-                        )
-                        
-                        # 建立关系
-                        relationships_data = character_data.get("relationships") or character_data.get("relationships_array", [])
-                        if relationships_data:
-                            await auto_char_service._create_relationships(
-                                new_character=character,
-                                relationship_specs=relationships_data,
-                                existing_characters=list(characters),
-                                project_id=project.id,
-                                db=db
-                            )
-                        
-                        characters.append(character)
-                        existing_character_names.add(character.name)  # 更新已存在的角色名称集合
-                        actually_created_count += 1
-                        logger.info(f"✅ 创建确认的角色: {character.name}")
-                        
-                    except Exception as e:
-                        logger.error(f"创建确认的角色失败: {e}", exc_info=True)
-                        continue
-                
-                # 提交角色到数据库
-                if actually_created_count > 0:
-                    await db.commit()
-                    logger.info(f"✅ 【确认模式】实际创建了 {actually_created_count} 个新角色（跳过了 {len(request.confirmed_characters) - actually_created_count} 个已存在的角色）")
-                else:
-                    logger.info(f"ℹ️ 【确认模式】所有角色均已存在，无需创建")
-                
-                # 更新角色信息（供后续大纲生成使用）
-                characters_info = _build_characters_info(characters)
-                
-            except Exception as e:
-                logger.error(f"⚠️ 【确认模式】创建确认角色失败: {e}", exc_info=True)
-        else:
-            # 根据 require_character_confirmation 决定处理方式
-            try:
-                from app.services.auto_character_service import get_auto_character_service
-                
-                # 构建已有章节概览
-                all_chapters_brief_for_analysis = _build_chapters_brief(existing_outlines)
-                
-                auto_char_service = get_auto_character_service(user_ai_service)
-                
-                if request.require_character_confirmation:
-                    # 🔮 预测模式：仅预测角色，不自动创建，需要用户确认
-                    logger.info(f"🔮 【预测模式】在生成大纲前预测是否需要新角色（需用户确认）")
-                    
-                    auto_result = await auto_char_service.analyze_and_create_characters(
-                        project_id=project.id,
-                        outline_content="",  # 预测模式不需要大纲内容
-                        existing_characters=list(characters),
-                        db=db,
-                        user_id=user_id,
-                        enable_mcp=request.enable_mcp,
-                        all_chapters_brief=all_chapters_brief_for_analysis,
-                        start_chapter=last_chapter_number + 1,
-                        chapter_count=total_chapters_to_generate,
-                        plot_stage=request.plot_stage,
-                        story_direction=request.story_direction or "自然延续",
-                        preview_only=True  # ✅ 仅预测不创建
-                    )
-                    
-                    # 检查是否需要新角色
-                    if auto_result.get("needs_new_characters") and auto_result.get("predicted_characters"):
-                        predicted_count = len(auto_result["predicted_characters"])
-                        logger.warning(
-                            f"⚠️ 【预测模式】AI预测需要 {predicted_count} 个新角色，需要用户确认！"
-                        )
-                        
-                        # 🚨 抛出特殊异常，包含预测的角色信息
-                        raise HTTPException(
-                            status_code=449,  # 449 Retry With
-                            detail={
-                                "code": "CHARACTER_CONFIRMATION_REQUIRED",
-                                "message": "续写需要引入新角色，请先确认角色信息",
-                                "predicted_characters": auto_result["predicted_characters"],
-                                "reason": auto_result.get("reason", "剧情发展需要新角色"),
-                                "chapter_range": f"第{last_chapter_number + 1}-{last_chapter_number + total_chapters_to_generate}章"
-                            }
-                        )
-                    else:
-                        logger.info(f"✅ 【预测模式】AI判断无需引入新角色，继续生成大纲")
-                else:
-                    # 🚀 直接创建模式：预测后自动创建，无需用户确认
-                    logger.info(f"🚀 【直接创建模式】在生成大纲前预测并直接创建新角色（无需确认）")
-                    
-                    auto_result = await auto_char_service.analyze_and_create_characters(
-                        project_id=project.id,
-                        outline_content="",
-                        existing_characters=list(characters),
-                        db=db,
-                        user_id=user_id,
-                        enable_mcp=request.enable_mcp,
-                        all_chapters_brief=all_chapters_brief_for_analysis,
-                        start_chapter=last_chapter_number + 1,
-                        chapter_count=total_chapters_to_generate,
-                        plot_stage=request.plot_stage,
-                        story_direction=request.story_direction or "自然延续",
-                        preview_only=False  # ✅ 直接创建角色
-                    )
-                    
-                    # 如果创建了新角色，更新角色列表
-                    if auto_result.get("new_characters"):
-                        new_count = len(auto_result["new_characters"])
-                        logger.info(f"✅ 【直接创建模式】自动创建了 {new_count} 个新角色")
-                        
-                        # 提交角色到数据库
-                        await db.commit()
-                        
-                        # 更新角色信息（供后续大纲生成使用）
-                        characters.extend(auto_result["new_characters"])
-                        characters_info = _build_characters_info(characters)
-                    else:
-                        logger.info(f"✅ 【直接创建模式】AI判断无需引入新角色，继续生成大纲")
-                    
-            except HTTPException:
-                raise
-            except Exception as e:
-                logger.error(f"⚠️ 【方案A】预测性角色引入失败: {e}", exc_info=True)
-                # 不阻断大纲生成流程
-    
-    # 🏛️ 【组织引入】在生成大纲前预测并创建组织
-    if request.enable_auto_organizations:
-        # 获取现有组织
-        existing_organizations = await _get_existing_organizations(project.id, db)
-        
-        # 检查是否有用户确认的组织列表
-        if request.confirmed_organizations:
-            # 直接使用用户确认的组织列表创建组织
-            try:
-                from app.services.auto_organization_service import get_auto_organization_service
-                
-                logger.info(f"🏛️ 【确认模式】用户提供了 {len(request.confirmed_organizations)} 个确认的组织，直接创建")
-                
-                auto_org_service = get_auto_organization_service(user_ai_service)
-                
-                for org_data in request.confirmed_organizations:
-                    try:
-                        # 生成组织详细信息
-                        organization_data = await auto_org_service._generate_organization_details(
-                            spec=org_data,
-                            project=project,
-                            existing_characters=list(characters),
-                            existing_organizations=existing_organizations,
-                            db=db,
-                            user_id=user_id,
-                            enable_mcp=request.enable_mcp
-                        )
-                        
-                        # 创建组织记录
-                        org_character, organization = await auto_org_service._create_organization_record(
-                            project_id=project.id,
-                            organization_data=organization_data,
-                            db=db
-                        )
-                        
-                        # 建立成员关系
-                        members_data = organization_data.get("initial_members", [])
-                        if members_data:
-                            await auto_org_service._create_member_relationships(
-                                organization=organization,
-                                member_specs=members_data,
-                                existing_characters=list(characters),
-                                project_id=project.id,
-                                db=db
-                            )
-                        
-                        # 更新角色列表（组织也是Character）
-                        characters.append(org_character)
-                        existing_organizations.append({
-                            "id": organization.id,
-                            "name": org_character.name,
-                            "organization_type": org_character.organization_type,
-                            "organization_purpose": org_character.organization_purpose,
-                            "power_level": organization.power_level,
-                            "location": organization.location,
-                            "motto": organization.motto
-                        })
-                        logger.info(f"✅ 创建确认的组织: {org_character.name}")
-                        
-                    except Exception as e:
-                        logger.error(f"创建确认的组织失败: {e}", exc_info=True)
-                        continue
-                
-                # 提交组织到数据库
-                await db.commit()
-                
-                # 更新角色信息（供后续大纲生成使用）
-                characters_info = _build_characters_info(characters)
-                
-                logger.info(f"✅ 【确认模式】成功创建 {len(request.confirmed_organizations)} 个用户确认的组织")
-                
-            except Exception as e:
-                logger.error(f"⚠️ 【确认模式】创建确认组织失败: {e}", exc_info=True)
-        else:
-            # 根据 require_organization_confirmation 决定处理方式
-            try:
-                from app.services.auto_organization_service import get_auto_organization_service
-                
-                # 构建已有章节概览
-                all_chapters_brief_for_org_analysis = _build_chapters_brief(existing_outlines)
-                
-                auto_org_service = get_auto_organization_service(user_ai_service)
-                
-                if request.require_organization_confirmation:
-                    # 🔮 预测模式：仅预测组织，不自动创建，需要用户确认
-                    logger.info(f"🔮 【预测模式】在生成大纲前预测是否需要新组织（需用户确认）")
-                    
-                    auto_result = await auto_org_service.analyze_and_create_organizations(
-                        project_id=project.id,
-                        outline_content="",  # 预测模式不需要大纲内容
-                        existing_characters=list(characters),
-                        existing_organizations=existing_organizations,
-                        db=db,
-                        user_id=user_id,
-                        enable_mcp=request.enable_mcp,
-                        all_chapters_brief=all_chapters_brief_for_org_analysis,
-                        start_chapter=last_chapter_number + 1,
-                        chapter_count=total_chapters_to_generate,
-                        plot_stage=request.plot_stage,
-                        story_direction=request.story_direction or "自然延续",
-                        preview_only=True  # ✅ 仅预测不创建
-                    )
-                    
-                    # 检查是否需要新组织
-                    if auto_result.get("needs_new_organizations") and auto_result.get("predicted_organizations"):
-                        predicted_count = len(auto_result["predicted_organizations"])
-                        logger.warning(
-                            f"⚠️ 【预测模式】AI预测需要 {predicted_count} 个新组织，需要用户确认！"
-                        )
-                        
-                        # 🚨 抛出特殊异常，包含预测的组织信息
-                        raise HTTPException(
-                            status_code=449,  # 449 Retry With
-                            detail={
-                                "code": "ORGANIZATION_CONFIRMATION_REQUIRED",
-                                "message": "续写需要引入新组织，请先确认组织信息",
-                                "predicted_organizations": auto_result["predicted_organizations"],
-                                "reason": auto_result.get("reason", "剧情发展需要新组织"),
-                                "chapter_range": f"第{last_chapter_number + 1}-{last_chapter_number + total_chapters_to_generate}章"
-                            }
-                        )
-                    else:
-                        logger.info(f"✅ 【预测模式】AI判断无需引入新组织，继续生成大纲")
-                else:
-                    # 🚀 直接创建模式：预测后自动创建，无需用户确认
-                    logger.info(f"🚀 【直接创建模式】在生成大纲前预测并直接创建新组织（无需确认）")
-                    
-                    auto_result = await auto_org_service.analyze_and_create_organizations(
-                        project_id=project.id,
-                        outline_content="",
-                        existing_characters=list(characters),
-                        existing_organizations=existing_organizations,
-                        db=db,
-                        user_id=user_id,
-                        enable_mcp=request.enable_mcp,
-                        all_chapters_brief=all_chapters_brief_for_org_analysis,
-                        start_chapter=last_chapter_number + 1,
-                        chapter_count=total_chapters_to_generate,
-                        plot_stage=request.plot_stage,
-                        story_direction=request.story_direction or "自然延续",
-                        preview_only=False  # ✅ 直接创建组织
-                    )
-                    
-                    # 如果创建了新组织，更新角色列表
-                    if auto_result.get("new_organizations"):
-                        new_count = len(auto_result["new_organizations"])
-                        logger.info(f"✅ 【直接创建模式】自动创建了 {new_count} 个新组织")
-                        
-                        # 提交组织到数据库
-                        await db.commit()
-                        
-                        # 更新角色信息（供后续大纲生成使用）
-                        for org_item in auto_result["new_organizations"]:
-                            org_char = org_item.get("character")
-                            if org_char:
-                                characters.append(org_char)
-                        characters_info = _build_characters_info(characters)
-                    else:
-                        logger.info(f"✅ 【直接创建模式】AI判断无需引入新组织，继续生成大纲")
-                    
-            except HTTPException:
-                raise
-            except Exception as e:
-                logger.error(f"⚠️ 【组织引入】预测性组织引入失败: {e}", exc_info=True)
-                # 不阻断大纲生成流程
-    
-    # 批量生成
-    all_new_outlines = []
-    current_start_chapter = last_chapter_number + 1
-    
-    for batch_num in range(total_batches):
-        # 计算当前批次的章节数
-        remaining_chapters = total_chapters_to_generate - len(all_new_outlines)
-        current_batch_size = min(batch_size, remaining_chapters)
-        
-        logger.info(f"开始生成第{batch_num + 1}/{total_batches}批，章节范围: {current_start_chapter}-{current_start_chapter + current_batch_size - 1}")
-        
-        # 获取最新的大纲列表（包括之前批次生成的）
-        latest_result = await db.execute(
-            select(Outline)
-            .where(Outline.project_id == project.id)
-            .order_by(Outline.order_index)
-        )
-        latest_outlines = latest_result.scalars().all()
-        
-        # 🚀 使用智能上下文构建（支持海量大纲）
-        smart_context = await _build_smart_outline_context(
-            latest_outlines=latest_outlines,
-            user_id=user_id,
-            project_id=project.id
-        )
-        
-        # 组装上下文字符串
-        all_chapters_brief = ""
-        if smart_context['story_skeleton']:
-            all_chapters_brief += smart_context['story_skeleton'] + "\n\n"
-        if smart_context['recent_summary']:
-            all_chapters_brief += smart_context['recent_summary'] + "\n\n"
-        
-        # 最近详细内容作为 recent_plot
-        recent_plot = smart_context['recent_detail']
-        
-        # 日志统计
-        stats = smart_context['stats']
-        logger.info(f"📊 大纲上下文统计: 总数{stats['total']}, 骨架{stats['skeleton_samples']}, "
-                   f"概要{stats['recent_summaries']}, 详细{stats['recent_details']}, "
-                   f"长度{stats['total_length']}字符")
-        
-        # 🧠 构建记忆增强上下文（仅续写模式需要）
-        memory_context = None
-        try:
-            logger.info(f"🧠 为第{batch_num + 1}批构建记忆上下文...")
-            # 使用最近一章的大纲作为查询
-            query_outline = latest_outlines[-1].content if latest_outlines else ""
-            memory_context = await memory_service.build_context_for_generation(
-                user_id=user_id,
-                project_id=project.id,
-                current_chapter=current_start_chapter,
-                chapter_outline=query_outline,
-                character_names=[c.name for c in characters] if characters else None
-            )
-            logger.info(f"✅ 记忆上下文构建完成: {memory_context['stats']}")
-        except Exception as e:
-            logger.warning(f"⚠️ 记忆上下文构建失败，继续不使用记忆: {str(e)}")
-            memory_context = None
-        
-        # 设置用户信息以启用MCP
-        if user_id:
-            user_ai_service.user_id = user_id
-            user_ai_service.db_session = db
-        
-        # 使用标准续写提示词模板（支持记忆+MCP增强+自定义）
-        template = await PromptService.get_template("OUTLINE_CONTINUE", user_id, db)
-        prompt = PromptService.format_prompt(
-            template,
-            title=project.title,
-            theme=request.theme or project.theme or "未设定",
-            genre=request.genre or project.genre or "通用",
-            narrative_perspective=request.narrative_perspective,
-            chapter_count=current_batch_size,  # 当前批次的章节数
-            time_period=project.world_time_period or "未设定",
-            location=project.world_location or "未设定",
-            atmosphere=project.world_atmosphere or "未设定",
-            rules=project.world_rules or "未设定",
-            characters_info=characters_info or "暂无角色信息",
-            current_chapter_count=len(latest_outlines),
-            all_chapters_brief=all_chapters_brief,
-            recent_plot=recent_plot,
-            plot_stage_instruction=stage_instruction,
-            start_chapter=current_start_chapter,
-            end_chapter=current_start_chapter + current_batch_size - 1,
-            story_direction=request.story_direction or "自然延续",
-            requirements=request.requirements or "",
-            memory_context=memory_context,
-            mcp_references=""
-        )
-        
-        # 调用AI生成当前批次（带重试机制）
-        logger.info(f"正在调用AI流式生成第{batch_num + 1}批...")
-        
-        max_retries = 2
-        retry_count = 0
-        outline_data = None
-        
-        while retry_count <= max_retries:
-            accumulated_text = ""
-            chunk_count = 0
-            
-            # 第一次使用原始prompt，重试时添加格式强调
-            current_prompt = prompt if retry_count == 0 else (
-                prompt + "\n\n【重要提醒】请确保返回完整的JSON数组，不要截断。每个章节对象必须包含完整的title、summary等字段。"
-            )
-            
-            async for chunk in user_ai_service.generate_text_stream(
-                prompt=current_prompt,
-                provider=request.provider,
-                model=request.model
-            ):
-                chunk_count += 1
-                accumulated_text += chunk
-                
-                # 这里是非SSE接口，不需要发送chunk
-            
-            ai_content = accumulated_text
-            ai_response = {"content": ai_content}
-            
-            # 解析响应
-            try:
-                outline_data = _parse_ai_response(ai_content, raise_on_error=True)
-                break  # 解析成功，跳出循环
-                
-            except JSONParseError as e:
-                retry_count += 1
-                if retry_count > max_retries:
-                    # 超过最大重试次数，使用fallback数据
-                    logger.error(f"❌ 第{batch_num + 1}批解析失败，已达最大重试次数({max_retries})，使用fallback数据")
-                    outline_data = _parse_ai_response(ai_content, raise_on_error=False)
-                    break
-                
-                logger.warning(f"⚠️ 第{batch_num + 1}批JSON解析失败（第{retry_count}次），正在重试...")
-        
-        # 保存当前批次的大纲
-        batch_outlines = await _save_outlines(
-            project.id, outline_data, db, start_index=current_start_chapter
-        )
-        
-        # 记录历史
-        history = GenerationHistory(
-            project_id=project.id,
-            prompt=f"[批次{batch_num + 1}/{total_batches}] {str(prompt)[:500]}",
-            generated_content=json.dumps(ai_response, ensure_ascii=False) if isinstance(ai_response, dict) else ai_response,
-            model=request.model or "default"
-        )
-        db.add(history)
-        
-        # 提交当前批次
-        await db.commit()
-        
-        for outline in batch_outlines:
-            await db.refresh(outline)
-        
-        all_new_outlines.extend(batch_outlines)
-        current_start_chapter += current_batch_size
-        
-        logger.info(f"第{batch_num + 1}批生成完成，本批生成{len(batch_outlines)}章")
-                
-    
-    # 返回所有大纲（包括旧的和新的）
-    final_result = await db.execute(
-        select(Outline)
-        .where(Outline.project_id == project.id)
-        .order_by(Outline.order_index)
-    )
-    all_outlines = final_result.scalars().all()
-    
-    logger.info(f"续写完成 - 共{total_batches}批，新增 {len(all_new_outlines)} 章，总计 {len(all_outlines)} 章")
-    return OutlineListResponse(total=len(all_outlines), items=all_outlines)
 
 
 class JSONParseError(Exception):
@@ -1447,7 +944,7 @@ async def _save_outlines(
     start_index: int = 1
 ) -> List[Outline]:
     """
-    保存大纲到数据库
+    保存大纲到数据库（修复版：从structure中提取title和content保存到数据库）
     
     如果项目为one-to-one模式，同时自动创建对应的章节
     """
@@ -1461,22 +958,15 @@ async def _save_outlines(
     
     for idx, chapter_data in enumerate(outline_data):
         order_idx = chapter_data.get("chapter_number", start_index + idx)
-        title = chapter_data.get("title", f"第{order_idx}章")
         
-        # 优先使用summary，其次content
-        content = chapter_data.get("summary") or chapter_data.get("content", "")
+        # 🔧 修复：从structure中提取title和summary/content保存到数据库
+        chapter_title = chapter_data.get("title", f"第{order_idx}章")
+        chapter_content = chapter_data.get("summary") or chapter_data.get("content", "")
         
-        # 如果有额外信息，添加到内容中
-        if "key_events" in chapter_data:
-            content += f"\n\n关键事件：" + "、".join(chapter_data["key_events"])
-        if "characters_involved" in chapter_data:
-            content += f"\n涉及角色：" + "、".join(chapter_data["characters_involved"])
-        
-        # 创建大纲
         outline = Outline(
             project_id=project_id,
-            title=title,
-            content=content,
+            title=chapter_title,  # 从JSON中提取title
+            content=chapter_content,  # 从JSON中提取summary或content
             structure=json.dumps(chapter_data, ensure_ascii=False),
             order_index=order_idx
         )
@@ -1490,11 +980,21 @@ async def _save_outlines(
         for outline in outlines:
             await db.refresh(outline)
             
+            # 🔧 从structure中提取title和summary用于创建章节
+            try:
+                structure_data = json.loads(outline.structure) if outline.structure else {}
+                chapter_title = structure_data.get("title", f"第{outline.order_index}章")
+                chapter_summary = structure_data.get("summary") or structure_data.get("content", "")
+            except json.JSONDecodeError:
+                logger.warning(f"解析大纲 {outline.id} 的structure失败，使用默认值")
+                chapter_title = f"第{outline.order_index}章"
+                chapter_summary = ""
+            
             # 为每个大纲创建对应的章节
             chapter = Chapter(
                 project_id=project_id,
-                title=outline.title,
-                summary=outline.content,
+                title=chapter_title,
+                summary=chapter_summary,
                 chapter_number=outline.order_index,
                 sub_index=1,
                 outline_id=None,  # one-to-one模式不关联outline_id
@@ -1561,7 +1061,6 @@ async def new_outline_generator(
             genre=data.get("genre") or project.genre or "通用",
             chapter_count=chapter_count,
             narrative_perspective=data.get("narrative_perspective") or "第三人称",
-            target_words=data.get("target_words") or project.target_words or 100000,
             time_period=project.world_time_period or "未设定",
             location=project.world_location or "未设定",
             atmosphere=project.world_atmosphere or "未设定",
@@ -1570,7 +1069,7 @@ async def new_outline_generator(
             requirements=data.get("requirements") or "",
             mcp_references=""
         )
-        
+        logger.debug(f"NEW提示词: {prompt}")
         # 添加调试日志
         model_param = data.get("model")
         provider_param = data.get("provider")
@@ -2329,49 +1828,25 @@ async def continue_outline_generator(
             )
             latest_outlines = latest_result.scalars().all()
             
-            # 🚀 使用智能上下文构建（支持海量大纲）
-            smart_context = await _build_smart_outline_context(
+            # 🚀 使用新的简化上下文构建
+            context = await _build_outline_continue_context(
+                project=project,
                 latest_outlines=latest_outlines,
-                user_id=user_id,
-                project_id=project_id
+                characters=characters,
+                chapter_count=current_batch_size,
+                plot_stage=data.get("plot_stage", "development"),
+                story_direction=data.get("story_direction", "自然延续"),
+                requirements=data.get("requirements", ""),
+                db=db
             )
             
-            # 组装上下文字符串
-            all_chapters_brief = ""
-            if smart_context['story_skeleton']:
-                all_chapters_brief += smart_context['story_skeleton'] + "\n\n"
-            if smart_context['recent_summary']:
-                all_chapters_brief += smart_context['recent_summary'] + "\n\n"
-            
-            # 最近详细内容作为 recent_plot
-            recent_plot = smart_context['recent_detail']
-            
             # 日志统计
-            stats = smart_context['stats']
-            logger.info(f"📊 批次{batch_num + 1}大纲上下文: 总数{stats['total']}, "
-                       f"骨架{stats['skeleton_samples']}, 概要{stats['recent_summaries']}, "
-                       f"详细{stats['recent_details']}, 长度{stats['total_length']}字符")
+            stats = context['stats']
+            logger.info(f"📊 批次{batch_num + 1}大纲上下文: 总大纲{stats['total_outlines']}, "
+                       f"最近{stats['recent_outlines_count']}章, "
+                       f"角色{stats['characters_count']}个, "
+                       f"长度{stats['total_length']}字符")
             
-            # 🧠 构建记忆增强上下文
-            memory_context = None
-            try:
-                yield await tracker.generating(
-                    current_chars=0,
-                    estimated_total=estimated_chars_per_batch,
-                    message="🧠 构建记忆上下文..."
-                )
-                query_outline = latest_outlines[-1].content if latest_outlines else ""
-                memory_context = await memory_service.build_context_for_generation(
-                    user_id=user_id,
-                    project_id=project_id,
-                    current_chapter=current_start_chapter,
-                    chapter_outline=query_outline,
-                    character_names=[c.name for c in characters] if characters else None
-                )
-                logger.info(f"✅ 记忆上下文: {memory_context['stats']}")
-            except Exception as e:
-                logger.warning(f"⚠️ 记忆上下文构建失败: {str(e)}")
-                memory_context = None
             # 设置用户信息以启用MCP
             if user_id:
                 user_ai_service.user_id = user_id
@@ -2383,32 +1858,33 @@ async def continue_outline_generator(
                 message=f"🤖 调用AI生成第{str(batch_num + 1)}批..."
             )
             
-            # 使用标准续写提示词模板（支持记忆+MCP增强+自定义）
+            # 使用标准续写提示词模板（简化版）
             template = await PromptService.get_template("OUTLINE_CONTINUE", user_id, db)
             prompt = PromptService.format_prompt(
                 template,
+                # 基础信息
                 title=project.title,
-                theme=data.get("theme") or project.theme or "未设定",
-                genre=data.get("genre") or project.genre or "通用",
-                narrative_perspective=data.get("narrative_perspective") or project.narrative_perspective or "第三人称",
-                chapter_count=current_batch_size,
+                theme=project.theme or "未设定",
+                genre=project.genre or "通用",
+                narrative_perspective=project.narrative_perspective or "第三人称",
                 time_period=project.world_time_period or "未设定",
                 location=project.world_location or "未设定",
                 atmosphere=project.world_atmosphere or "未设定",
                 rules=project.world_rules or "未设定",
-                characters_info=characters_info or "暂无角色信息",
-                current_chapter_count=len(latest_outlines),
-                all_chapters_brief=all_chapters_brief,
-                recent_plot=recent_plot,
-                plot_stage_instruction=stage_instruction,
+                # 上下文信息
+                recent_outlines=context['recent_outlines'],
+                characters_info=context['characters_info'],
+                # 续写参数
+                chapter_count=current_batch_size,
                 start_chapter=current_start_chapter,
                 end_chapter=current_start_chapter + current_batch_size - 1,
+                current_chapter_count=len(latest_outlines),
+                plot_stage_instruction=stage_instruction,
                 story_direction=data.get("story_direction", "自然延续"),
                 requirements=data.get("requirements", ""),
-                memory_context=memory_context,
                 mcp_references=""
             )
-            
+            logger.debug(f" 续写提示词: {prompt}")
             # 调用AI生成当前批次
             model_param = data.get("model")
             provider_param = data.get("provider")
