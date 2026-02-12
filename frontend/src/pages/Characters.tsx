@@ -35,7 +35,6 @@ interface CharacterFormValues {
   role_type?: string;
   personality?: string;
   appearance?: string;
-  relationships?: string;
   background?: string;
   main_career_id?: string;
   main_career_stage?: number;
@@ -60,7 +59,6 @@ interface CharacterCreateData {
   role_type?: string;
   personality?: string;
   appearance?: string;
-  relationships?: string;
   background?: string;
   main_career_id?: string;
   main_career_stage?: number;
@@ -82,7 +80,6 @@ interface CharacterUpdateData {
   role_type?: string;
   personality?: string;
   appearance?: string;
-  relationships?: string;
   background?: string;
   main_career_id?: string;
   main_career_stage?: number;
@@ -271,7 +268,6 @@ export default function Characters() {
         createData.role_type = values.role_type || 'supporting';
         createData.personality = values.personality;
         createData.appearance = values.appearance;
-        createData.relationships = values.relationships;
         createData.background = values.background;
         
         // 职业字段
@@ -288,7 +284,6 @@ export default function Characters() {
         // 组织字段
         createData.organization_type = values.organization_type;
         createData.organization_purpose = values.organization_purpose;
-        createData.organization_members = values.organization_members;
         createData.background = values.background;
         createData.power_level = values.power_level;
         createData.location = values.location;
@@ -1018,10 +1013,17 @@ export default function Characters() {
                 </Col>
               </Row>
 
-              {/* 第三行：人际关系 */}
-              <Form.Item label="人际关系" name="relationships" style={{ marginBottom: 12 }}>
-                <Input placeholder="描述角色与其他角色的关系..." />
-              </Form.Item>
+              {/* 人际关系（只读，由关系管理页面维护） */}
+              {editingCharacter?.relationships && (
+                <Form.Item label="人际关系（由关系管理维护）" style={{ marginBottom: 12 }}>
+                  <Input.TextArea
+                    value={editingCharacter.relationships}
+                    readOnly
+                    autoSize={{ minRows: 1, maxRows: 3 }}
+                    style={{ backgroundColor: '#f5f5f5', cursor: 'default' }}
+                  />
+                </Form.Item>
+              )}
 
               {/* 第四行：角色背景 */}
               <Form.Item label="角色背景" name="background" style={{ marginBottom: 12 }}>
@@ -1182,19 +1184,32 @@ export default function Characters() {
                 <Input placeholder="描述组织的宗旨和目标..." />
               </Form.Item>
 
-              {/* 第三行：主要成员、所在地、代表颜色 */}
+              {/* 第三行：主要成员（只读展示） */}
+              <Form.Item
+                label="主要成员"
+                name="organization_members"
+                style={{ marginBottom: 4 }}
+                tooltip="成员信息由组织管理模块维护，此处仅展示"
+              >
+                <TextArea
+                  disabled
+                  autoSize={{ minRows: 1, maxRows: 4 }}
+                  placeholder="暂无成员，请在组织管理中添加"
+                  style={{ color: '#333', backgroundColor: '#fafafa' }}
+                />
+              </Form.Item>
+              <div style={{ marginBottom: 12, fontSize: 12, color: '#8c8c8c' }}>
+                💡 请前往「组织管理」页面添加或管理组织成员
+              </div>
+
+              {/* 第四行：所在地、代表颜色 */}
               <Row gutter={12}>
-                <Col span={10}>
-                  <Form.Item label="主要成员" name="organization_members" style={{ marginBottom: 12 }}>
-                    <Input placeholder="如：张三、李四" />
-                  </Form.Item>
-                </Col>
-                <Col span={8}>
+                <Col span={12}>
                   <Form.Item label="所在地" name="location" style={{ marginBottom: 12 }}>
                     <Input placeholder="总部位置" />
                   </Form.Item>
                 </Col>
-                <Col span={6}>
+                <Col span={12}>
                   <Form.Item label="代表颜色" name="color" style={{ marginBottom: 12 }}>
                     <Input placeholder="如：金色" />
                   </Form.Item>
@@ -1289,12 +1304,7 @@ export default function Characters() {
                 </Col>
               </Row>
 
-              {/* 第三行：人际关系 */}
-              <Form.Item label="人际关系" name="relationships" style={{ marginBottom: 12 }}>
-                <Input placeholder="描述角色与其他角色的关系..." />
-              </Form.Item>
-
-              {/* 第四行：角色背景 */}
+              {/* 第三行：角色背景 */}
               <Form.Item label="角色背景" name="background" style={{ marginBottom: 12 }}>
                 <TextArea rows={2} placeholder="描述角色的背景故事..." />
               </Form.Item>
@@ -1454,19 +1464,14 @@ export default function Characters() {
                 <Input placeholder="描述组织的宗旨和目标..." />
               </Form.Item>
 
-              {/* 第三行：主要成员、所在地、代表颜色 */}
+              {/* 第三行：所在地、代表颜色 */}
               <Row gutter={12}>
-                <Col span={10}>
-                  <Form.Item label="主要成员" name="organization_members" style={{ marginBottom: 12 }}>
-                    <Input placeholder="如：张三、李四" />
-                  </Form.Item>
-                </Col>
-                <Col span={8}>
+                <Col span={12}>
                   <Form.Item label="所在地" name="location" style={{ marginBottom: 12 }}>
                     <Input placeholder="总部位置" />
                   </Form.Item>
                 </Col>
-                <Col span={6}>
+                <Col span={12}>
                   <Form.Item label="代表颜色" name="color" style={{ marginBottom: 12 }}>
                     <Input placeholder="如：金色" />
                   </Form.Item>

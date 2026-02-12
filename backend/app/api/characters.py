@@ -31,6 +31,90 @@ router = APIRouter(prefix="/characters", tags=["角色管理"])
 logger = get_logger(__name__)
 
 
+async def _build_relationships_summary(character_id: str, project_id: str, db: AsyncSession) -> str:
+    """从 character_relationships 表构建角色关系摘要文本"""
+    from sqlalchemy import or_
+    
+    # 查询该角色参与的所有关系
+    rels_result = await db.execute(
+        select(CharacterRelationship).where(
+            CharacterRelationship.project_id == project_id,
+            or_(
+                CharacterRelationship.character_from_id == character_id,
+                CharacterRelationship.character_to_id == character_id
+            )
+        )
+    )
+    rels = rels_result.scalars().all()
+    
+    if not rels:
+        return ""
+    
+    # 收集所有相关角色ID
+    related_ids = set()
+    for r in rels:
+        related_ids.add(r.character_from_id)
+        related_ids.add(r.character_to_id)
+    related_ids.discard(character_id)
+    
+    if not related_ids:
+        return ""
+    
+    # 批量查询角色名称
+    chars_result = await db.execute(
+        select(Character.id, Character.name).where(Character.id.in_(related_ids))
+    )
+    name_map = {row.id: row.name for row in chars_result}
+    
+    # 构建摘要
+    parts = []
+    for r in rels:
+        if r.character_from_id == character_id:
+            target_name = name_map.get(r.character_to_id, "未知")
+            rel_name = r.relationship_name or "相关"
+        else:
+            target_name = name_map.get(r.character_from_id, "未知")
+            rel_name = r.relationship_name or "相关"
+        parts.append(f"与{target_name}：{rel_name}")
+    
+    return "；".join(parts)
+
+
+async def _build_org_members_summary(character_id: str, db: AsyncSession) -> str:
+    """从 organization_members 表构建组织成员摘要文本"""
+    # 先查找该角色对应的 Organization 记录
+    org_result = await db.execute(
+        select(Organization).where(Organization.character_id == character_id)
+    )
+    org = org_result.scalar_one_or_none()
+    if not org:
+        return ""
+    
+    # 查询该组织的所有成员
+    members_result = await db.execute(
+        select(OrganizationMember).where(OrganizationMember.organization_id == org.id)
+    )
+    members = members_result.scalars().all()
+    if not members:
+        return ""
+    
+    # 批量查询成员角色名称
+    member_char_ids = [m.character_id for m in members]
+    chars_result = await db.execute(
+        select(Character.id, Character.name).where(Character.id.in_(member_char_ids))
+    )
+    name_map = {row.id: row.name for row in chars_result}
+    
+    # 构建摘要
+    parts = []
+    for m in members:
+        name = name_map.get(m.character_id, "未知")
+        position = m.position or "成员"
+        parts.append(f"{name}（{position}）")
+    
+    return "、".join(parts)
+
+
 @router.get("", response_model=CharacterListResponse, summary="获取角色列表")
 async def get_characters(
     project_id: str,
@@ -56,9 +140,12 @@ async def get_characters(
     )
     characters = result.scalars().all()
     
-    # 为组织类型的角色填充Organization表的额外字段，并添加职业信息
+    # 为角色填充关系摘要、组织额外字段、职业信息
     enriched_characters = []
     for char in characters:
+        # 从 character_relationships 表动态生成关系摘要
+        rel_summary = await _build_relationships_summary(char.id, project_id, db)
+        
         char_dict = {
             "id": char.id,
             "project_id": char.project_id,
@@ -70,10 +157,10 @@ async def get_characters(
             "personality": char.personality,
             "background": char.background,
             "appearance": char.appearance,
-            "relationships": char.relationships,
+            "relationships": rel_summary,
             "organization_type": char.organization_type,
             "organization_purpose": char.organization_purpose,
-            "organization_members": char.organization_members,
+            "organization_members": await _build_org_members_summary(char.id, db) if char.is_organization else "",
             "traits": char.traits,
             "avatar_url": char.avatar_url,
             "created_at": char.created_at,
@@ -130,9 +217,12 @@ async def get_project_characters(
     )
     characters = result.scalars().all()
     
-    # 为组织类型的角色填充Organization表的额外字段，并添加职业信息
+    # 为角色填充关系摘要、组织额外字段、职业信息
     enriched_characters = []
     for char in characters:
+        # 从 character_relationships 表动态生成关系摘要
+        rel_summary = await _build_relationships_summary(char.id, project_id, db)
+        
         char_dict = {
             "id": char.id,
             "project_id": char.project_id,
@@ -144,10 +234,10 @@ async def get_project_characters(
             "personality": char.personality,
             "background": char.background,
             "appearance": char.appearance,
-            "relationships": char.relationships,
+            "relationships": rel_summary,
             "organization_type": char.organization_type,
             "organization_purpose": char.organization_purpose,
-            "organization_members": char.organization_members,
+            "organization_members": await _build_org_members_summary(char.id, db) if char.is_organization else "",
             "traits": char.traits,
             "avatar_url": char.avatar_url,
             "created_at": char.created_at,
@@ -198,7 +288,51 @@ async def get_character(
     user_id = getattr(request.state, 'user_id', None)
     await verify_project_access(character.project_id, user_id, db)
     
-    return character
+    # 从 character_relationships 表动态生成关系摘要
+    rel_summary = await _build_relationships_summary(character.id, character.project_id, db)
+    
+    char_dict = {
+        "id": character.id,
+        "project_id": character.project_id,
+        "name": character.name,
+        "age": character.age,
+        "gender": character.gender,
+        "is_organization": character.is_organization,
+        "role_type": character.role_type,
+        "personality": character.personality,
+        "background": character.background,
+        "appearance": character.appearance,
+        "relationships": rel_summary,
+        "organization_type": character.organization_type,
+        "organization_purpose": character.organization_purpose,
+        "organization_members": await _build_org_members_summary(character.id, db) if character.is_organization else "",
+        "traits": character.traits,
+        "avatar_url": character.avatar_url,
+        "created_at": character.created_at,
+        "updated_at": character.updated_at,
+        "power_level": None,
+        "location": None,
+        "motto": None,
+        "color": None,
+        "main_career_id": character.main_career_id,
+        "main_career_stage": character.main_career_stage,
+        "sub_careers": json.loads(character.sub_careers) if character.sub_careers else None
+    }
+    
+    if character.is_organization:
+        org_result = await db.execute(
+            select(Organization).where(Organization.character_id == character.id)
+        )
+        org = org_result.scalar_one_or_none()
+        if org:
+            char_dict.update({
+                "power_level": org.power_level,
+                "location": org.location,
+                "motto": org.motto,
+                "color": org.color
+            })
+    
+    return char_dict
 
 
 @router.put("/{character_id}", response_model=CharacterResponse, summary="更新角色")
@@ -372,7 +506,9 @@ async def update_character(
         character.sub_careers = sub_careers_json if isinstance(sub_careers_json, str) else json.dumps(sub_careers_data, ensure_ascii=False)
         logger.info(f"更新副职业信息：{character.name}")
     
-    # 更新 Character 表字段
+    # 更新 Character 表字段（排除 relationships 和 organization_members，这些字段现在由结构化表驱动）
+    update_data.pop('relationships', None)
+    update_data.pop('organization_members', None)
     for field, value in update_data.items():
         setattr(character, field, value)
     
@@ -403,7 +539,8 @@ async def update_character(
     
     logger.info(f"更新角色/组织成功：{character.name} (ID: {character_id})")
     
-    # 构建响应，确保sub_careers是list类型
+    # 构建响应，从关系表动态生成 relationships
+    rel_summary = await _build_relationships_summary(character_id, character.project_id, db)
     response_data = {
         "id": character.id,
         "project_id": character.project_id,
@@ -415,10 +552,10 @@ async def update_character(
         "personality": character.personality,
         "background": character.background,
         "appearance": character.appearance,
-        "relationships": character.relationships,
+        "relationships": rel_summary,
         "organization_type": character.organization_type,
         "organization_purpose": character.organization_purpose,
-        "organization_members": character.organization_members,
+        "organization_members": await _build_org_members_summary(character.id, db) if character.is_organization else "",
         "traits": character.traits,
         "avatar_url": character.avatar_url,
         "created_at": character.created_at,
@@ -510,7 +647,7 @@ async def create_character(
     await verify_project_access(character_data.project_id, user_id, db)
     
     try:
-        # 创建角色
+        # 创建角色（不再写入 relationships 文本字段，关系统一由 character_relationships 表管理）
         character = Character(
             project_id=character_data.project_id,
             name=character_data.name,
@@ -521,10 +658,8 @@ async def create_character(
             personality=character_data.personality,
             background=character_data.background,
             appearance=character_data.appearance,
-            relationships=character_data.relationships,
             organization_type=character_data.organization_type,
             organization_purpose=character_data.organization_purpose,
-            organization_members=character_data.organization_members,
             traits=character_data.traits,
             avatar_url=character_data.avatar_url,
             main_career_id=character_data.main_career_id,
@@ -623,7 +758,49 @@ async def create_character(
         
         logger.info(f"🎉 成功手动创建角色/组织: {character.name}")
         
-        return character
+        # 构建响应（relationships 从关系表动态生成）
+        char_dict = {
+            "id": character.id,
+            "project_id": character.project_id,
+            "name": character.name,
+            "age": character.age,
+            "gender": character.gender,
+            "is_organization": character.is_organization,
+            "role_type": character.role_type,
+            "personality": character.personality,
+            "background": character.background,
+            "appearance": character.appearance,
+            "relationships": "",
+            "organization_type": character.organization_type,
+            "organization_purpose": character.organization_purpose,
+            "organization_members": await _build_org_members_summary(character.id, db) if character.is_organization else "",
+            "traits": character.traits,
+            "avatar_url": character.avatar_url,
+            "created_at": character.created_at,
+            "updated_at": character.updated_at,
+            "power_level": None,
+            "location": None,
+            "motto": None,
+            "color": None,
+            "main_career_id": character.main_career_id,
+            "main_career_stage": character.main_career_stage,
+            "sub_careers": json.loads(character.sub_careers) if character.sub_careers else None
+        }
+        
+        if character.is_organization:
+            org_result = await db.execute(
+                select(Organization).where(Organization.character_id == character.id)
+            )
+            org = org_result.scalar_one_or_none()
+            if org:
+                char_dict.update({
+                    "power_level": org.power_level,
+                    "location": org.location,
+                    "motto": org.motto,
+                    "color": org.color
+                })
+        
+        return char_dict
         
     except Exception as e:
         logger.error(f"手动创建角色失败: {str(e)}")
@@ -878,7 +1055,7 @@ async def generate_character_stream(
                             else:
                                 logger.warning(f"⚠️ AI返回的副职业名称未找到: {career_name}")
             
-            # 创建角色
+            # 创建角色（不再写入 relationships 文本字段，关系统一由 character_relationships 表管理）
             character = Character(
                 project_id=request.project_id,
                 name=character_data.get("name", request.name or "未命名角色"),
@@ -889,10 +1066,8 @@ async def generate_character_stream(
                 personality=character_data.get("personality", ""),
                 background=character_data.get("background", ""),
                 appearance=character_data.get("appearance", ""),
-                relationships=character_data.get("relationships_text", character_data.get("relationships", "")),
                 organization_type=character_data.get("organization_type") if is_organization else None,
                 organization_purpose=character_data.get("organization_purpose") if is_organization else None,
-                organization_members=json.dumps(character_data.get("organization_members", []), ensure_ascii=False) if is_organization else None,
                 traits=traits_json,
                 main_career_id=main_career_id,
                 main_career_stage=main_career_stage if main_career_id else None,
