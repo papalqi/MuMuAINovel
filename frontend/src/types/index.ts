@@ -76,6 +76,19 @@ export interface PresetListResponse {
   active_preset_id?: string;
 }
 
+// AI 路由（按任务选择不同 API 预设）
+export interface AIRouteTask {
+  key: string;
+  label: string;
+  category: string;
+}
+
+export interface AIRoutesResponse {
+  version: string;
+  routes: Record<string, string | null>; // task_key -> preset_id（null 表示使用当前配置）
+  tasks: AIRouteTask[];
+}
+
 // LinuxDO 授权 URL 响应
 export interface AuthUrlResponse {
   auth_url: string;

@@ -6,7 +6,7 @@ import json
 
 from app.database import get_db
 from app.services.ai_service import AIService
-from app.api.settings import get_user_ai_service
+from app.api.settings import get_user_ai_service_for_task
 from app.services.prompt_service import PromptService
 from app.logger import get_logger
 
@@ -71,7 +71,7 @@ async def generate_options(
     data: Dict[str, Any],
     http_request: Request,
     db: AsyncSession = Depends(get_db),
-    ai_service: AIService = Depends(get_user_ai_service)
+    ai_service: AIService = Depends(get_user_ai_service_for_task("inspiration_options"))
 ) -> Dict[str, Any]:
     """
     根据当前收集的信息生成下一步的选项建议（带自动重试）
@@ -226,7 +226,7 @@ async def refine_options(
     data: Dict[str, Any],
     http_request: Request,
     db: AsyncSession = Depends(get_db),
-    ai_service: AIService = Depends(get_user_ai_service)
+    ai_service: AIService = Depends(get_user_ai_service_for_task("inspiration_options"))
 ) -> Dict[str, Any]:
     """
     基于用户反馈重新生成选项（支持多轮对话）
@@ -400,7 +400,7 @@ async def quick_generate(
     data: Dict[str, Any],
     http_request: Request,
     db: AsyncSession = Depends(get_db),
-    ai_service: AIService = Depends(get_user_ai_service)
+    ai_service: AIService = Depends(get_user_ai_service_for_task("inspiration_options"))
 ) -> Dict[str, Any]:
     """
     智能补全：根据用户已提供的部分信息，AI自动补全缺失字段

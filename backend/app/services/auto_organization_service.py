@@ -462,4 +462,7 @@ def get_auto_organization_service(ai_service: AIService) -> AutoOrganizationServ
     global _auto_organization_service_instance
     if _auto_organization_service_instance is None:
         _auto_organization_service_instance = AutoOrganizationService(ai_service)
+    else:
+        # 更新为最新的 AIService（避免用户切换配置/模型后仍使用旧实例）
+        _auto_organization_service_instance.ai_service = ai_service
     return _auto_organization_service_instance

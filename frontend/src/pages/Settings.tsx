@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { Card, Form, Input, Button, Select, Slider, InputNumber, message, Space, Typography, Spin, Modal, Alert, Grid, Tabs, List, Tag, Popconfirm, Empty, Row, Col } from 'antd';
 import { SaveOutlined, DeleteOutlined, ReloadOutlined, InfoCircleOutlined, CheckCircleOutlined, CloseCircleOutlined, ThunderboltOutlined, PlusOutlined, EditOutlined, CopyOutlined, WarningOutlined } from '@ant-design/icons';
 import { settingsApi, mcpPluginApi } from '../services/api';
-import type { SettingsUpdate, APIKeyPreset, PresetCreateRequest, APIKeyPresetConfig } from '../types';
+import type { SettingsUpdate, APIKeyPreset, PresetCreateRequest, APIKeyPresetConfig, AIRouteTask } from '../types';
 import { eventBus, EventNames } from '../store/eventBus';
 
 const { Title, Text } = Typography;
@@ -49,6 +49,13 @@ export default function SettingsPage() {
   const [fetchingPresetModels, setFetchingPresetModels] = useState(false);
   const [presetModelsFetched, setPresetModelsFetched] = useState(false);
 
+  // AI 路由（按任务选择不同预设）
+  const [aiRoutesLoading, setAiRoutesLoading] = useState(false);
+  const [aiRoutesSaving, setAiRoutesSaving] = useState(false);
+  const [aiRoutes, setAiRoutes] = useState<Record<string, string | null>>({});
+  const [aiRouteTasks, setAiRouteTasks] = useState<AIRouteTask[]>([]);
+  const [aiRoutesDirty, setAiRoutesDirty] = useState(false);
+
   useEffect(() => {
     loadSettings();
     if (activeTab === 'presets') {
@@ -60,6 +67,10 @@ export default function SettingsPage() {
   useEffect(() => {
     if (activeTab === 'presets') {
       loadPresets();
+    } else if (activeTab === 'ai_routes') {
+      // 路由设置依赖预设列表
+      loadPresets();
+      loadAiRoutes();
     } else if (activeTab === 'current') {
       // 切换到当前配置Tab时，刷新设置以获取最新数据
       loadSettings();
@@ -395,6 +406,39 @@ export default function SettingsPage() {
       console.error(error);
     } finally {
       setPresetsLoading(false);
+    }
+  };
+
+  // ========== AI 路由设置（按任务选择预设） ==========
+
+  const loadAiRoutes = async () => {
+    setAiRoutesLoading(true);
+    try {
+      const res = await settingsApi.getAiRoutes();
+      setAiRoutes(res.routes || {});
+      setAiRouteTasks(res.tasks || []);
+      setAiRoutesDirty(false);
+    } catch (error) {
+      message.error('加载 AI 路由配置失败');
+      console.error(error);
+    } finally {
+      setAiRoutesLoading(false);
+    }
+  };
+
+  const handleSaveAiRoutes = async () => {
+    setAiRoutesSaving(true);
+    try {
+      const res = await settingsApi.updateAiRoutes({ routes: aiRoutes });
+      setAiRoutes(res.routes || {});
+      setAiRouteTasks(res.tasks || []);
+      setAiRoutesDirty(false);
+      message.success('AI 路由配置已保存');
+    } catch (error) {
+      message.error('保存 AI 路由配置失败');
+      console.error(error);
+    } finally {
+      setAiRoutesSaving(false);
     }
   };
 
@@ -775,6 +819,169 @@ export default function SettingsPage() {
       default:
         return 'default';
     }
+  };
+
+  // ========== 渲染 AI 路由配置 ==========
+
+  const renderAiRoutes = () => {
+    const presetOptions = [
+      {
+        value: '',
+        label: '使用当前配置',
+        provider: '',
+        model: '',
+        is_active: false,
+      },
+      ...presets.map((p) => ({
+        value: p.id,
+        label: p.name,
+        provider: p.config.api_provider,
+        model: p.config.llm_model,
+        is_active: p.id === activePresetId,
+      })),
+    ];
+
+    // 按 category 分组展示
+    const grouped = aiRouteTasks.reduce<Record<string, AIRouteTask[]>>((acc, t) => {
+      const cat = t.category || '其他';
+      if (!acc[cat]) acc[cat] = [];
+      acc[cat].push(t);
+      return acc;
+    }, {});
+
+    return (
+      <Spin spinning={aiRoutesLoading}>
+        <Space direction="vertical" size="middle" style={{ width: '100%' }}>
+          <Alert
+            type="info"
+            showIcon
+            message="按“请求类型”分配不同的 API 预设"
+            description={
+              <div style={{ fontSize: isMobile ? 12 : 13 }}>
+                <p style={{ margin: '8px 0' }}>
+                  你可以让不同 AI 请求（如：生成大纲、生成章节、章节分析、去味/润色）使用不同的预设（不同模型/不同Key/不同Provider）。
+                </p>
+                <p style={{ margin: 0 }}>
+                  若某项选择“使用当前配置”，则该请求将使用 <strong>当前配置</strong>（或你已激活的预设）。
+                </p>
+              </div>
+            }
+          />
+
+          {presets.length === 0 && (
+            <Alert
+              type="warning"
+              showIcon
+              message="你还没有创建任何预设"
+              description="请先在「配置预设」里创建不同模型的预设，然后再回来为各类请求分配。"
+            />
+          )}
+
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <Text type="secondary">修改后记得点击保存</Text>
+            <Space>
+              <Button icon={<ReloadOutlined />} onClick={loadAiRoutes} disabled={aiRoutesLoading}>
+                重新加载
+              </Button>
+              <Button
+                type="primary"
+                icon={<SaveOutlined />}
+                onClick={handleSaveAiRoutes}
+                loading={aiRoutesSaving}
+                disabled={!aiRoutesDirty}
+              >
+                保存
+              </Button>
+            </Space>
+          </div>
+
+          {aiRouteTasks.length === 0 ? (
+            <Empty description="暂无可配置的请求类型" image={Empty.PRESENTED_IMAGE_SIMPLE} />
+          ) : (
+            Object.entries(grouped).map(([category, tasks]) => (
+              <Card
+                key={category}
+                size="small"
+                title={category}
+                style={{ borderRadius: 8 }}
+              >
+                <List
+                  dataSource={tasks}
+                  renderItem={(task) => (
+                    <List.Item
+                      key={task.key}
+                      style={{
+                        padding: isMobile ? '12px 0' : '10px 0',
+                        flexDirection: isMobile ? 'column' as const : 'row' as const,
+                        alignItems: isMobile ? 'stretch' : 'center',
+                        gap: isMobile ? 8 : 12,
+                      }}
+                    >
+                      <div style={{ flex: 1 }}>
+                        <Text strong>{task.label}</Text>
+                        <div style={{ fontSize: 12, color: 'var(--color-text-secondary)', marginTop: 4 }}>
+                          task_key: <code>{task.key}</code>
+                        </div>
+                      </div>
+
+                      <div style={{ width: isMobile ? '100%' : 520 }}>
+                        <Select
+                          value={(aiRoutes?.[task.key] ?? '') as string}
+                          options={presetOptions}
+                          onChange={(value) => {
+                            const presetId = value ? String(value) : '';
+                            setAiRoutes((prev) => ({
+                              ...(prev || {}),
+                              [task.key]: presetId === '' ? null : presetId,
+                            }));
+                            setAiRoutesDirty(true);
+                          }}
+                          style={{ width: '100%' }}
+                          optionFilterProp="label"
+                          showSearch
+                          filterOption={(input, option) => {
+                            const needle = input.toLowerCase();
+                            const label = String(option?.label ?? '').toLowerCase();
+                            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                            const provider = String((option as any)?.provider ?? '').toLowerCase();
+                            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                            const model = String((option as any)?.model ?? '').toLowerCase();
+                            return label.includes(needle) || provider.includes(needle) || model.includes(needle);
+                          }}
+                          optionRender={(option) => {
+                            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                            const data = option.data as any;
+                            if (String(data?.value ?? '') === '') {
+                              return (
+                                <Space size={8}>
+                                  <Text>使用当前配置</Text>
+                                  <Text type="secondary" style={{ fontSize: 12 }}>
+                                    （当前设置 / 已激活预设）
+                                  </Text>
+                                </Space>
+                              );
+                            }
+
+                            return (
+                              <Space size={8} wrap>
+                                <span style={{ fontWeight: 500 }}>{data.label}</span>
+                                {data.is_active && <Tag color="success">当前激活</Tag>}
+                                <Tag color={getProviderColor(data.provider)}>{String(data.provider).toUpperCase()}</Tag>
+                                <Tag>{data.model}</Tag>
+                              </Space>
+                            );
+                          }}
+                        />
+                      </div>
+                    </List.Item>
+                  )}
+                />
+              </Card>
+            ))
+          )}
+        </Space>
+      </Spin>
+    );
   };
 
   // ========== 渲染预设列表 ==========
@@ -1486,6 +1693,11 @@ export default function SettingsPage() {
                   key: 'presets',
                   label: '配置预设',
                   children: renderPresetsList(),
+                },
+                {
+                  key: 'ai_routes',
+                  label: '请求分流',
+                  children: renderAiRoutes(),
                 },
               ]}
             />

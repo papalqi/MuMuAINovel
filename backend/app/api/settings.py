@@ -28,6 +28,178 @@ logger = get_logger(__name__)
 
 router = APIRouter(prefix="/settings", tags=["设置管理"])
 
+# ==================== AI 路由（按任务选择不同模型/Provider） ====================
+#
+# 设计目标：
+# - 允许用户在前端设置“不同 AI 请求类型使用不同 API 预设（provider/key/base_url/model）”
+# - 路由信息存储在 settings.preferences(JSON) 中，避免新增数据库字段
+# - 后端通过 task_key 解析路由，动态创建对应的 AIService（从而支持跨 provider 分流且使用不同 key）
+#
+
+AI_ROUTE_VERSION = "1.0"
+
+# task_key 约定：只用于“路由选择”，不直接暴露为业务概念。
+# 前端使用这些 key 显示配置项；后端在各 API 调用点选择对应 key。
+AI_ROUTE_TASKS: list[dict[str, str]] = [
+    {"key": "wizard_world_building", "label": "向导：世界观生成", "category": "向导"},
+    {"key": "wizard_outline", "label": "向导：大纲生成", "category": "向导"},
+    {"key": "inspiration_options", "label": "灵感模式：生成选项", "category": "灵感"},
+    {"key": "outline_generate", "label": "大纲：生成/续写", "category": "大纲"},
+    {"key": "outline_expand", "label": "大纲：展开章节规划", "category": "大纲"},
+    {"key": "chapter_generate", "label": "章节：生成正文", "category": "章节"},
+    {"key": "chapter_regenerate", "label": "章节：重写/再生成", "category": "章节"},
+    {"key": "chapter_analysis", "label": "章节：剧情分析/伏笔提取", "category": "章节"},
+    {"key": "polish", "label": "文本：去味/润色", "category": "文本"},
+    {"key": "character_generate", "label": "设定：生成角色", "category": "设定"},
+    {"key": "organization_generate", "label": "设定：生成组织", "category": "设定"},
+    {"key": "career_generate", "label": "设定：生成/补全职业", "category": "设定"},
+]
+
+
+class AIRouteTask(BaseModel):
+    key: str
+    label: str
+    category: str
+
+
+class AIRoutesResponse(BaseModel):
+    version: str = AI_ROUTE_VERSION
+    routes: Dict[str, Optional[str]]  # task_key -> preset_id (None 表示使用当前配置)
+    tasks: List[AIRouteTask]
+
+
+class AIRoutesUpdateRequest(BaseModel):
+    routes: Dict[str, Optional[str]]
+
+
+def _safe_load_preferences(preferences: Optional[str]) -> Dict[str, Any]:
+    if not preferences:
+        return {}
+    try:
+        raw = json.loads(preferences)
+        return raw if isinstance(raw, dict) else {}
+    except json.JSONDecodeError:
+        return {}
+
+
+def _get_presets_from_preferences(prefs: Dict[str, Any]) -> List[Dict[str, Any]]:
+    api_presets = prefs.get("api_presets") or {}
+    presets = api_presets.get("presets") or []
+    return presets if isinstance(presets, list) else []
+
+
+def _get_ai_routes_from_preferences(prefs: Dict[str, Any]) -> Dict[str, Optional[str]]:
+    ai_routes = prefs.get("ai_routes") or {}
+    routes = ai_routes.get("routes") if isinstance(ai_routes, dict) else None
+    if not isinstance(routes, dict):
+        return {}
+
+    # 只保留 str/None，避免脏数据
+    cleaned: Dict[str, Optional[str]] = {}
+    for k, v in routes.items():
+        if v is None:
+            cleaned[str(k)] = None
+        elif isinstance(v, str) and v.strip():
+            cleaned[str(k)] = v.strip()
+        else:
+            cleaned[str(k)] = None
+    return cleaned
+
+
+def _upsert_ai_routes_to_preferences(
+    prefs: Dict[str, Any],
+    routes: Dict[str, Optional[str]],
+) -> Dict[str, Any]:
+    prefs = dict(prefs or {})
+    prefs["ai_routes"] = {
+        "version": AI_ROUTE_VERSION,
+        "updated_at": datetime.now().isoformat(),
+        "routes": routes,
+    }
+    return prefs
+
+
+def _resolve_preset_config(
+    *,
+    prefs: Dict[str, Any],
+    preset_id: str,
+) -> Optional[Dict[str, Any]]:
+    if not preset_id:
+        return None
+    for preset in _get_presets_from_preferences(prefs):
+        if str(preset.get("id")) == preset_id:
+            cfg = preset.get("config")
+            return cfg if isinstance(cfg, dict) else None
+    return None
+
+
+async def create_user_ai_service_for_task(
+    *,
+    user_id: str,
+    db: AsyncSession,
+    task_key: str,
+    request_enable_mcp: Optional[bool] = None,
+) -> AIService:
+    """根据 task_key 路由创建对应 AIService（支持跨 provider + 不同 key）。
+
+    路由优先级：
+    1) preferences.ai_routes.routes[task_key] 指向的 preset config
+    2) 回退到 Settings 主字段（当前配置）
+    """
+    from app.models.mcp_plugin import MCPPlugin
+
+    settings = await get_user_settings(user_id, db)
+    prefs = _safe_load_preferences(settings.preferences)
+    routes = _get_ai_routes_from_preferences(prefs)
+
+    preset_id = routes.get(task_key)
+    preset_cfg = _resolve_preset_config(prefs=prefs, preset_id=preset_id) if preset_id else None
+
+    # MCP 启用逻辑：与 get_user_ai_service 保持一致，再叠加 request_enable_mcp（如传入）
+    mcp_result = await db.execute(select(MCPPlugin).where(MCPPlugin.user_id == user_id))
+    mcp_plugins = mcp_result.scalars().all()
+    enable_mcp_by_plugins = any(plugin.enabled for plugin in mcp_plugins) if mcp_plugins else False
+    enable_mcp = enable_mcp_by_plugins
+    if request_enable_mcp is not None:
+        enable_mcp = enable_mcp and bool(request_enable_mcp)
+
+    if preset_cfg:
+        # 数值类型（例如 temperature=0.0）不能用 `or` 合并，否则 0.0 会被误判为“未设置”
+        resolved_temperature = preset_cfg.get("temperature")
+        if resolved_temperature is None:
+            resolved_temperature = settings.temperature if settings.temperature is not None else app_settings.default_temperature
+
+        resolved_max_tokens = preset_cfg.get("max_tokens")
+        if resolved_max_tokens is None:
+            resolved_max_tokens = settings.max_tokens if settings.max_tokens is not None else app_settings.default_max_tokens
+
+        return create_user_ai_service_with_mcp(
+            api_provider=str(preset_cfg.get("api_provider") or settings.api_provider),
+            api_key=str(preset_cfg.get("api_key") or settings.api_key or ""),
+            api_base_url=str(preset_cfg.get("api_base_url") or settings.api_base_url or ""),
+            model_name=str(preset_cfg.get("llm_model") or settings.llm_model),
+            temperature=float(resolved_temperature),
+            max_tokens=int(resolved_max_tokens),
+            user_id=user_id,
+            db_session=db,
+            system_prompt=settings.system_prompt,
+            enable_mcp=enable_mcp,
+        )
+
+    # fallback：当前配置
+    return create_user_ai_service_with_mcp(
+        api_provider=settings.api_provider,
+        api_key=settings.api_key,
+        api_base_url=settings.api_base_url or "",
+        model_name=settings.llm_model,
+        temperature=settings.temperature,
+        max_tokens=settings.max_tokens,
+        user_id=user_id,
+        db_session=db,
+        system_prompt=settings.system_prompt,
+        enable_mcp=enable_mcp,
+    )
+
 
 def read_env_defaults() -> Dict[str, Any]:
     """从.env文件读取默认配置（仅读取，不修改）"""
@@ -107,6 +279,26 @@ async def get_user_ai_service(
         system_prompt=settings.system_prompt,
         enable_mcp=enable_mcp,         # 根据MCP插件状态动态决定
     )
+
+
+def get_user_ai_service_for_task(task_key: str):
+    """依赖工厂：为指定 task_key 创建 AIService（支持按任务路由到不同预设）。
+
+    用法示例：
+        user_ai_service: AIService = Depends(get_user_ai_service_for_task("chapter_generate"))
+    """
+
+    async def _dep(
+        user: User = Depends(require_login),
+        db: AsyncSession = Depends(get_db),
+    ) -> AIService:
+        return await create_user_ai_service_for_task(
+            user_id=user.user_id,
+            db=db,
+            task_key=task_key,
+        )
+
+    return _dep
 
 
 @router.get("", response_model=SettingsResponse)
@@ -1024,6 +1216,76 @@ async def activate_preset(
         "preset_id": preset_id,
         "preset_name": target_preset['name']
     }
+
+
+@router.get("/ai-routes", response_model=AIRoutesResponse)
+async def get_ai_routes(
+    user: User = Depends(require_login),
+    db: AsyncSession = Depends(get_db),
+):
+    """获取 AI 任务路由配置（task_key -> preset_id）。"""
+    settings = await get_user_settings(user.user_id, db)
+    prefs = _safe_load_preferences(settings.preferences)
+    routes = _get_ai_routes_from_preferences(prefs)
+
+    # 确保所有已定义 task_key 都返回（未配置则 None）
+    full_routes: Dict[str, Optional[str]] = {
+        item["key"]: routes.get(item["key"])
+        for item in AI_ROUTE_TASKS
+    }
+
+    return AIRoutesResponse(
+        version=AI_ROUTE_VERSION,
+        routes=full_routes,
+        tasks=[AIRouteTask(**item) for item in AI_ROUTE_TASKS],
+    )
+
+
+@router.put("/ai-routes", response_model=AIRoutesResponse)
+async def update_ai_routes(
+    data: AIRoutesUpdateRequest,
+    user: User = Depends(require_login),
+    db: AsyncSession = Depends(get_db),
+):
+    """更新 AI 任务路由配置。
+
+    - routes 的 value 为 preset_id 或 None（None 表示使用当前配置）
+    - preset_id 必须存在于用户的 api_presets 中
+    """
+    settings = await get_user_settings(user.user_id, db)
+    prefs = _safe_load_preferences(settings.preferences)
+
+    # 校验 preset_id 是否存在
+    presets = _get_presets_from_preferences(prefs)
+    preset_ids = {str(p.get("id")) for p in presets if p.get("id")}
+
+    for task_key, preset_id in (data.routes or {}).items():
+        if preset_id is None:
+            continue
+        if not isinstance(preset_id, str) or not preset_id.strip():
+            continue
+        if preset_id not in preset_ids:
+            raise HTTPException(status_code=400, detail=f"路由配置引用了不存在的预设: {preset_id} (task={task_key})")
+
+    # 只保存已定义任务的配置（忽略未知 key，避免前后端版本差异造成污染）
+    normalized_routes: Dict[str, Optional[str]] = {}
+    for item in AI_ROUTE_TASKS:
+        key = item["key"]
+        val = (data.routes or {}).get(key)
+        if isinstance(val, str) and val.strip():
+            normalized_routes[key] = val.strip()
+        else:
+            normalized_routes[key] = None
+
+    prefs = _upsert_ai_routes_to_preferences(prefs, normalized_routes)
+    settings.preferences = json.dumps(prefs, ensure_ascii=False)
+    await db.commit()
+
+    return AIRoutesResponse(
+        version=AI_ROUTE_VERSION,
+        routes=normalized_routes,
+        tasks=[AIRouteTask(**item) for item in AI_ROUTE_TASKS],
+    )
 
 
 @router.post("/presets/{preset_id}/test")

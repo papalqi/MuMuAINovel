@@ -49,6 +49,7 @@ import type {
   PresetCreateRequest,
   PresetUpdateRequest,
   PresetListResponse,
+  AIRoutesResponse,
   ChapterPlanItem,
 } from '../types';
 
@@ -274,6 +275,13 @@ export const settingsApi = {
     api.post<unknown, APIKeyPreset>('/settings/presets/from-current', null, {
       params: { name, description }
     }),
+
+  // AI 任务路由（按请求类型选择不同预设）
+  getAiRoutes: () =>
+    api.get<unknown, AIRoutesResponse>('/settings/ai-routes'),
+
+  updateAiRoutes: (data: { routes: Record<string, string | null> }) =>
+    api.put<unknown, AIRoutesResponse>('/settings/ai-routes', data),
 };
 
 export const projectApi = {

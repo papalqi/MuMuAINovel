@@ -51,7 +51,7 @@ from app.services.memory_service import memory_service
 from app.services.foreshadow_service import foreshadow_service
 from app.services.chapter_regenerator import ChapterRegenerator
 from app.logger import get_logger
-from app.api.settings import get_user_ai_service
+from app.api.settings import get_user_ai_service_for_task
 from app.utils.sse_response import SSEResponse, create_sse_response
 
 router = APIRouter(prefix="/chapters", tags=["章节管理"])
@@ -823,6 +823,20 @@ async def analyze_chapter_background(
             expire_on_commit=False
         )
         db_session = AsyncSessionLocal()
+
+        # ✅ 章节分析可能希望使用与“章节生成”不同的模型/Provider
+        # 这里强制按 task_key=chapter_analysis 重新创建 AIService（若失败则回退到调用方传入的 ai_service）。
+        try:
+            from app.api.settings import create_user_ai_service_for_task
+
+            ai_service = await create_user_ai_service_for_task(
+                user_id=user_id,
+                db=db_session,
+                task_key="chapter_analysis",
+            )
+            logger.info("✅ 已按 chapter_analysis 路由创建 AIService")
+        except Exception as route_error:
+            logger.warning(f"⚠️ 创建 chapter_analysis 路由 AIService 失败，回退到调用方传入的 AIService: {route_error}")
         
         # 1. 获取任务（读操作）
         task_result = await db_session.execute(
@@ -1317,7 +1331,7 @@ async def generate_chapter_content_stream(
     request: Request,
     background_tasks: BackgroundTasks,
     generate_request: ChapterGenerateRequest = ChapterGenerateRequest(),
-    user_ai_service: AIService = Depends(get_user_ai_service)
+    user_ai_service: AIService = Depends(get_user_ai_service_for_task("chapter_generate"))
 ):
     """
     根据大纲、前置章节内容和项目信息AI创作章节完整内容（流式返回）
@@ -2141,7 +2155,7 @@ async def trigger_chapter_analysis(
     request: Request,
     background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
-    user_ai_service: AIService = Depends(get_user_ai_service)
+    user_ai_service: AIService = Depends(get_user_ai_service_for_task("chapter_analysis"))
 ):
     """
     手动触发章节分析(用于重新分析或分析旧章节)
@@ -2238,7 +2252,7 @@ async def batch_generate_chapters_in_order(
     request: Request,
     background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
-    user_ai_service: AIService = Depends(get_user_ai_service)
+    user_ai_service: AIService = Depends(get_user_ai_service_for_task("chapter_generate"))
 ):
     """
     从指定章节开始，按顺序批量生成指定数量的章节
@@ -3012,7 +3026,7 @@ async def regenerate_chapter_stream(
     regenerate_request: ChapterRegenerateRequest,
     background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
-    user_ai_service: AIService = Depends(get_user_ai_service)
+    user_ai_service: AIService = Depends(get_user_ai_service_for_task("chapter_regenerate"))
 ):
     """
     根据分析建议或自定义指令重新生成章节内容（流式返回）
@@ -3484,7 +3498,7 @@ async def partial_regenerate_stream(
     request: Request,
     partial_request: PartialRegenerateRequest,
     db: AsyncSession = Depends(get_db),
-    user_ai_service: AIService = Depends(get_user_ai_service)
+    user_ai_service: AIService = Depends(get_user_ai_service_for_task("chapter_regenerate"))
 ):
     """
     对章节中选中的部分内容进行流式重写
@@ -3807,4 +3821,3 @@ async def apply_partial_regenerate(
         "old_word_count": old_word_count,
         "message": "局部重写已应用"
     }
-
