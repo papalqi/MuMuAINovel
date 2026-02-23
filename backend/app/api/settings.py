@@ -147,6 +147,52 @@ class RetrievalConfigUpdateRequest(BaseModel):
     rerank: RerankConfig
 
 
+class EmbeddingTestRequest(BaseModel):
+    """Embedding 可用性检测请求（不落库，仅用于 UI 检测按钮）。"""
+
+    model_config = {"protected_namespaces": ()}
+
+    embedding: EmbeddingConfig
+
+
+class EmbeddingTestResponse(BaseModel):
+    """Embedding 可用性检测响应。"""
+
+    model_config = {"protected_namespaces": ()}
+
+    success: bool
+    message: str
+    backend: str
+    response_time_ms: Optional[float] = None
+    details: Optional[Dict[str, Any]] = None
+    error: Optional[str] = None
+    error_type: Optional[str] = None
+    suggestions: Optional[List[str]] = None
+
+
+class RerankTestRequest(BaseModel):
+    """Rerank 可用性检测请求（不落库，仅用于 UI 检测按钮）。"""
+
+    model_config = {"protected_namespaces": ()}
+
+    rerank: RerankConfig
+
+
+class RerankTestResponse(BaseModel):
+    """Rerank 可用性检测响应。"""
+
+    model_config = {"protected_namespaces": ()}
+
+    success: bool
+    enabled: bool
+    message: str
+    response_time_ms: Optional[float] = None
+    details: Optional[Dict[str, Any]] = None
+    error: Optional[str] = None
+    error_type: Optional[str] = None
+    suggestions: Optional[List[str]] = None
+
+
 def _safe_load_preferences(preferences: Optional[str]) -> Dict[str, Any]:
     if not preferences:
         return {}
@@ -1423,6 +1469,365 @@ async def update_retrieval_config(
         return RetrievalConfigResponse()
 
 
+
+
+@router.post("/retrieval/test-embedding", response_model=EmbeddingTestResponse)
+async def test_embedding_config(
+    data: EmbeddingTestRequest,
+    user: User = Depends(require_login),
+    db: AsyncSession = Depends(get_db),
+):
+    """检测 Embedding 配置是否可用（用于前端 Settings 检测按钮）。
+
+    - backend=local：检查本地 sentence-transformers 模型是否已加载
+    - backend=remote：调用 OpenAI 兼容 /v1/embeddings 做一次最小请求并校验返回格式
+
+    注意：该接口不写入 settings.preferences，仅用于检测。
+    """
+    from app.services.memory_service import memory_service
+
+    settings = await get_user_settings(user.user_id, db)
+
+    embedding = data.embedding
+    backend = str(getattr(embedding, "backend", None) or "local").lower()
+
+    if backend != "remote":
+        ok = getattr(memory_service, "embedding_model", None) is not None
+        if ok:
+            return EmbeddingTestResponse(
+                success=True,
+                backend="local",
+                message="本地 Embedding 模型已加载，可正常使用",
+                details={
+                    "model_loaded": True,
+                    "hint": "当前为本地 embedding。若想避免本地模型体积/依赖，可切换到远端 embedding。",
+                },
+            )
+        return EmbeddingTestResponse(
+            success=False,
+            backend="local",
+            message="本地 Embedding 模型未加载（将导致记忆检索失败）",
+            error="Local embedding model not loaded",
+            error_type="LocalEmbeddingNotLoaded",
+            suggestions=[
+                "请确认 embedding 模型文件已存在（例如 paraphrase-multilingual-MiniLM-L12-v2）",
+                "如果你使用的是 Docker 镜像版本：请确认镜像内已包含 embedding 模型文件，或按项目说明下载模型",
+                "也可以在设置中将 Embedding 后端切换为「远端（OpenAI 兼容 /v1/embeddings）」",
+            ],
+        )
+
+    remote = embedding.remote
+    provider = str(getattr(remote, "provider", None) or "openai_compatible")
+    model = getattr(remote, "model", None) or None
+
+    # 允许留空复用当前 LLM 配置（与 MemoryService 行为保持一致）
+    api_base_url = getattr(remote, "api_base_url", None) or (settings.api_base_url if settings else None)
+    api_key = getattr(remote, "api_key", None) or (settings.api_key if settings else None) or ""
+    timeout_s = int(getattr(remote, "timeout_s", None) or 60)
+
+    used_fallback_base_url = not bool(getattr(remote, "api_base_url", None))
+    used_fallback_api_key = not bool(getattr(remote, "api_key", None))
+
+    if not api_base_url or not model:
+        return EmbeddingTestResponse(
+            success=False,
+            backend="remote",
+            message="远端 Embedding 配置不完整",
+            error="api_base_url / model 不能为空（api_base_url 允许留空复用当前配置，但当前配置也为空）",
+            error_type="ConfigurationError",
+            suggestions=[
+                "请填写 Embedding 模型名称（model）",
+                "请填写 Embedding API 地址（api_base_url），或先在「当前配置」中填写 API 地址以供复用",
+            ],
+        )
+
+    if provider != "openai_compatible":
+        provider = "openai_compatible"
+
+    url = memory_service._build_openai_compatible_url(str(api_base_url), "embeddings")
+    headers: Dict[str, str] = {"Content-Type": "application/json"}
+    if api_key:
+        headers["Authorization"] = f"Bearer {api_key}"
+
+    payload = {"model": model, "input": ["你好，Embedding 测试"], "encoding_format": "float"}
+
+    start = time.time()
+    try:
+        async with httpx.AsyncClient(timeout=timeout_s) as client:
+            resp = await client.post(url, headers=headers, json=payload)
+            resp.raise_for_status()
+            data_json = resp.json()
+
+        cost_ms = round((time.time() - start) * 1000, 2)
+
+        items = data_json.get("data") or []
+        if not isinstance(items, list) or not items:
+            raise ValueError("返回缺少 data 数组或 data 为空")
+
+        first = items[0] if isinstance(items[0], dict) else None
+        if not first:
+            raise ValueError("返回 data[0] 不是对象")
+
+        emb = first.get("embedding")
+        if not isinstance(emb, list) or not emb:
+            raise ValueError("返回 data[0].embedding 不是非空 list")
+
+        try:
+            _ = float(emb[0])
+        except Exception:
+            raise ValueError("返回 embedding 不是数值列表")
+
+        return EmbeddingTestResponse(
+            success=True,
+            backend="remote",
+            message="远端 Embedding 检测通过",
+            response_time_ms=cost_ms,
+            details={
+                "api_base_url": api_base_url,
+                "endpoint": url,
+                "model": model,
+                "vector_dim": len(emb),
+                "preview": emb[:8],
+                "used_fallback": {
+                    "api_base_url": used_fallback_base_url,
+                    "api_key": used_fallback_api_key,
+                },
+            },
+        )
+
+    except httpx.HTTPStatusError as e:
+        status = e.response.status_code if e.response else None
+        raw = ""
+        try:
+            raw = e.response.text if e.response else ""
+        except Exception:
+            raw = ""
+
+        suggestions: list[str] = []
+        if status in (401, 403):
+            suggestions = ["API Key 认证失败：请检查 Embedding API Key 是否正确/有权限。"]
+        elif status == 404:
+            suggestions = ["接口或模型不存在：请检查 api_base_url 是否包含 /v1，以及 model 名称是否正确。"]
+        elif status == 400:
+            suggestions = [
+                "请求参数不符合该服务的 embeddings 接口要求。",
+                "建议检查：model 名称、是否需要 encoding_format、input 是否支持数组。",
+            ]
+        elif status == 429:
+            suggestions = ["触发限流（429）：请降低并发/频率或稍后重试，或更换额度更高的服务。"]
+        else:
+            suggestions = ["服务端返回错误：请查看错误详情或稍后重试。"]
+
+        return EmbeddingTestResponse(
+            success=False,
+            backend="remote",
+            message="远端 Embedding 检测失败",
+            error=f"HTTP {status}: {raw[:500]}",
+            error_type="HTTPStatusError",
+            suggestions=suggestions,
+        )
+
+    except httpx.RequestError as e:
+        return EmbeddingTestResponse(
+            success=False,
+            backend="remote",
+            message="远端 Embedding 检测失败（网络/连接错误）",
+            error=str(e),
+            error_type="RequestError",
+            suggestions=[
+                "请检查网络是否可达该 Embedding 服务",
+                "请检查 api_base_url 是否正确（是否需要走代理）",
+                "若是自建服务：确认端口、TLS、域名解析正常",
+            ],
+        )
+
+    except Exception as e:
+        return EmbeddingTestResponse(
+            success=False,
+            backend="remote",
+            message="远端 Embedding 检测失败（未知错误）",
+            error=str(e),
+            error_type=type(e).__name__,
+            suggestions=["请检查配置是否正确，或查看后端日志 app.log 获取更多信息。"],
+        )
+
+
+@router.post("/retrieval/test-rerank", response_model=RerankTestResponse)
+async def test_rerank_config(
+    data: RerankTestRequest,
+    user: User = Depends(require_login),
+    db: AsyncSession = Depends(get_db),
+):
+    """检测 Rerank 配置是否可用（用于前端 Settings 检测按钮）。
+
+    - enabled=false：直接返回提示（不报错）
+    - enabled=true：调用 Cohere 兼容 /v1/rerank 做一次最小请求并校验返回格式
+
+    注意：该接口不写入 settings.preferences，仅用于检测。
+    """
+    from app.services.memory_service import memory_service
+
+    settings = await get_user_settings(user.user_id, db)
+
+    rerank = data.rerank
+    enabled = bool(getattr(rerank, "enabled", False))
+    if not enabled:
+        return RerankTestResponse(
+            success=True,
+            enabled=False,
+            message="Rerank 未启用，无需检测",
+            details={"enabled": False},
+        )
+
+    remote = rerank.remote
+    provider = str(getattr(remote, "provider", None) or "cohere_compatible")
+    model = getattr(remote, "model", None) or None
+    api_base_url = getattr(remote, "api_base_url", None) or (settings.api_base_url if settings else None)
+    api_key = getattr(remote, "api_key", None) or (settings.api_key if settings else None) or ""
+    timeout_s = int(getattr(remote, "timeout_s", None) or 60)
+    top_n_cfg = int(getattr(remote, "top_n", None) or 10)
+
+    used_fallback_base_url = not bool(getattr(remote, "api_base_url", None))
+    used_fallback_api_key = not bool(getattr(remote, "api_key", None))
+
+    if not api_base_url or not model:
+        return RerankTestResponse(
+            success=False,
+            enabled=True,
+            message="远端 Rerank 配置不完整",
+            error="api_base_url / model 不能为空（api_base_url 允许留空复用当前配置，但当前配置也为空）",
+            error_type="ConfigurationError",
+            suggestions=[
+                "请填写 Rerank 模型名称（model）",
+                "请填写 Rerank API 地址（api_base_url），或先在「当前配置」中填写 API 地址以供复用",
+            ],
+        )
+
+    if provider != "cohere_compatible":
+        provider = "cohere_compatible"
+
+    url = memory_service._build_openai_compatible_url(str(api_base_url), "rerank")
+    headers: Dict[str, str] = {"Content-Type": "application/json"}
+    if api_key:
+        headers["Authorization"] = f"Bearer {api_key}"
+
+    query = "如何在2005年的电脑上提升程序运行速度？"
+    documents = [
+        "给内存加到512MB以上，关闭后台程序，减少磁盘碎片。",
+        "买一台更好的显卡可以让打字更快。",
+        "降低算法复杂度，避免不必要的IO，使用缓存。",
+    ]
+    top_n = max(1, min(top_n_cfg, len(documents)))
+
+    payload = {"model": model, "query": query, "documents": documents, "top_n": top_n}
+
+    start = time.time()
+    try:
+        async with httpx.AsyncClient(timeout=timeout_s) as client:
+            resp = await client.post(url, headers=headers, json=payload)
+            resp.raise_for_status()
+            data_json = resp.json()
+
+        cost_ms = round((time.time() - start) * 1000, 2)
+
+        results = data_json.get("results") or data_json.get("data") or []
+        if not isinstance(results, list) or not results:
+            raise ValueError("返回缺少 results 数组或 results 为空")
+
+        parsed: list[dict[str, Any]] = []
+        for r in results[: min(5, len(results))]:
+            if not isinstance(r, dict):
+                continue
+            idx = r.get("index")
+            score = r.get("relevance_score", r.get("score"))
+            try:
+                idx_i = int(idx)
+            except Exception:
+                continue
+            try:
+                score_f = float(score) if score is not None else None
+            except Exception:
+                score_f = None
+            parsed.append({"index": idx_i, "score": score_f})
+
+        if not parsed:
+            raise ValueError("results 解析失败：缺少 index / relevance_score")
+
+        return RerankTestResponse(
+            success=True,
+            enabled=True,
+            message="远端 Rerank 检测通过",
+            response_time_ms=cost_ms,
+            details={
+                "api_base_url": api_base_url,
+                "endpoint": url,
+                "model": model,
+                "top_n": top_n,
+                "sample_query": query,
+                "sample_docs_count": len(documents),
+                "top_results_preview": parsed,
+                "used_fallback": {
+                    "api_base_url": used_fallback_base_url,
+                    "api_key": used_fallback_api_key,
+                },
+            },
+        )
+
+    except httpx.HTTPStatusError as e:
+        status = e.response.status_code if e.response else None
+        raw = ""
+        try:
+            raw = e.response.text if e.response else ""
+        except Exception:
+            raw = ""
+
+        suggestions: list[str] = []
+        if status in (401, 403):
+            suggestions = ["API Key 认证失败：请检查 Rerank API Key 是否正确/有权限。"]
+        elif status == 404:
+            suggestions = ["接口或模型不存在：请检查 api_base_url 是否包含 /v1，以及 model 名称是否正确。"]
+        elif status == 400:
+            suggestions = [
+                "请求参数不符合该服务的 rerank 接口要求。",
+                "建议检查：model 名称、top_n 是否合理、documents 是否为字符串数组。",
+            ]
+        elif status == 429:
+            suggestions = ["触发限流（429）：请降低并发/频率或稍后重试，或更换额度更高的服务。"]
+        else:
+            suggestions = ["服务端返回错误：请查看错误详情或稍后重试。"]
+
+        return RerankTestResponse(
+            success=False,
+            enabled=True,
+            message="远端 Rerank 检测失败",
+            error=f"HTTP {status}: {raw[:500]}",
+            error_type="HTTPStatusError",
+            suggestions=suggestions,
+        )
+
+    except httpx.RequestError as e:
+        return RerankTestResponse(
+            success=False,
+            enabled=True,
+            message="远端 Rerank 检测失败（网络/连接错误）",
+            error=str(e),
+            error_type="RequestError",
+            suggestions=[
+                "请检查网络是否可达该 Rerank 服务",
+                "请检查 api_base_url 是否正确（是否需要走代理）",
+                "若是自建服务：确认端口、TLS、域名解析正常",
+            ],
+        )
+
+    except Exception as e:
+        return RerankTestResponse(
+            success=False,
+            enabled=True,
+            message="远端 Rerank 检测失败（未知错误）",
+            error=str(e),
+            error_type=type(e).__name__,
+            suggestions=["请检查配置是否正确，或查看后端日志 app.log 获取更多信息。"],
+        )
 @router.post("/presets/{preset_id}/test")
 async def test_preset(
     preset_id: str,

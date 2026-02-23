@@ -133,6 +133,29 @@ export interface RetrievalConfigUpdateRequest {
   rerank: RerankConfig;
 }
 
+
+export interface RetrievalEmbeddingTestResponse {
+  success: boolean;
+  message: string;
+  backend: string;
+  response_time_ms?: number;
+  details?: Record<string, unknown>;
+  error?: string;
+  error_type?: string;
+  suggestions?: string[];
+}
+
+export interface RetrievalRerankTestResponse {
+  success: boolean;
+  enabled: boolean;
+  message: string;
+  response_time_ms?: number;
+  details?: Record<string, unknown>;
+  error?: string;
+  error_type?: string;
+  suggestions?: string[];
+}
+
 // LinuxDO 授权 URL 响应
 export interface AuthUrlResponse {
   auth_url: string;

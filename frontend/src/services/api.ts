@@ -52,6 +52,10 @@ import type {
   AIRoutesResponse,
   RetrievalConfigResponse,
   RetrievalConfigUpdateRequest,
+  EmbeddingConfig,
+  RerankConfig,
+  RetrievalEmbeddingTestResponse,
+  RetrievalRerankTestResponse,
   ChapterPlanItem,
 } from '../types';
 
@@ -291,6 +295,12 @@ export const settingsApi = {
 
   updateRetrievalConfig: (data: RetrievalConfigUpdateRequest) =>
     api.put<unknown, RetrievalConfigResponse>('/settings/retrieval', data),
+
+  testEmbedding: (data: { embedding: EmbeddingConfig }) =>
+    api.post<unknown, RetrievalEmbeddingTestResponse>('/settings/retrieval/test-embedding', data),
+
+  testRerank: (data: { rerank: RerankConfig }) =>
+    api.post<unknown, RetrievalRerankTestResponse>('/settings/retrieval/test-rerank', data),
 };
 
 export const projectApi = {

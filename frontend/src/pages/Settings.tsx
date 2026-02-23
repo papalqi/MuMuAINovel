@@ -1,8 +1,8 @@
 import { useState, useEffect } from 'react';
 import { Card, Form, Input, Button, Select, Slider, InputNumber, message, Space, Typography, Spin, Modal, Alert, Grid, Tabs, List, Tag, Popconfirm, Empty, Row, Col, Switch, Divider } from 'antd';
-import { SaveOutlined, DeleteOutlined, ReloadOutlined, InfoCircleOutlined, CheckCircleOutlined, CloseCircleOutlined, ThunderboltOutlined, PlusOutlined, EditOutlined, CopyOutlined, WarningOutlined } from '@ant-design/icons';
+import { SaveOutlined, DeleteOutlined, ReloadOutlined, InfoCircleOutlined, CheckCircleOutlined, CloseCircleOutlined, ThunderboltOutlined, PlusOutlined, EditOutlined, CopyOutlined, WarningOutlined, ExperimentOutlined } from '@ant-design/icons';
 import { settingsApi, mcpPluginApi } from '../services/api';
-import type { SettingsUpdate, APIKeyPreset, PresetCreateRequest, APIKeyPresetConfig, AIRouteTask, RetrievalConfigResponse, RetrievalConfigUpdateRequest } from '../types';
+import type { SettingsUpdate, APIKeyPreset, PresetCreateRequest, APIKeyPresetConfig, AIRouteTask, RetrievalConfigResponse, RetrievalConfigUpdateRequest, RetrievalEmbeddingTestResponse, RetrievalRerankTestResponse } from '../types';
 import { eventBus, EventNames } from '../store/eventBus';
 
 const { Title, Text } = Typography;
@@ -59,6 +59,8 @@ export default function SettingsPage() {
   // 向量检索（Embedding / Rerank）配置
   const [retrievalLoading, setRetrievalLoading] = useState(false);
   const [retrievalSaving, setRetrievalSaving] = useState(false);
+  const [retrievalTestingEmbedding, setRetrievalTestingEmbedding] = useState(false);
+  const [retrievalTestingRerank, setRetrievalTestingRerank] = useState(false);
   const [retrievalDirty, setRetrievalDirty] = useState(false);
   const [retrievalConfig, setRetrievalConfig] = useState<RetrievalConfigResponse | null>(null);
   const [retrievalForm] = Form.useForm<RetrievalConfigUpdateRequest>();
@@ -495,6 +497,157 @@ export default function SettingsPage() {
     }
   };
 
+  const handleTestEmbeddingConfig = async () => {
+    setRetrievalTestingEmbedding(true);
+    try {
+      const values = await retrievalForm.validateFields();
+      const result: RetrievalEmbeddingTestResponse = await settingsApi.testEmbedding({ embedding: values.embedding });
+
+      if (result.success) {
+        modal.success({
+          title: 'Embedding 检测通过',
+          centered: true,
+          width: isMobile ? '90%' : 640,
+          content: (
+            <div style={{ padding: '8px 0' }}>
+              <Alert message={result.message} type="success" showIcon style={{ marginBottom: 16 }} />
+              <div style={{ padding: 16, background: 'var(--color-bg-layout)', borderRadius: 8 }}>
+                <div style={{ marginBottom: 8 }}>
+                  <Text type="secondary">后端：</Text> <Text strong>{result.backend}</Text>
+                </div>
+                {result.response_time_ms !== undefined && (
+                  <div style={{ marginBottom: 8 }}>
+                    <Text type="secondary">响应时间：</Text> <Text strong>{result.response_time_ms}ms</Text>
+                  </div>
+                )}
+                {result.details && (
+                  <div>
+                    <Text type="secondary">详情：</Text>
+                    <pre style={{ marginTop: 8, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+                      {JSON.stringify(result.details, null, 2)}
+                    </pre>
+                  </div>
+                )}
+              </div>
+            </div>
+          ),
+          okText: '知道了',
+        });
+      } else {
+        modal.error({
+          title: 'Embedding 检测失败',
+          centered: true,
+          width: isMobile ? '90%' : 640,
+          content: (
+            <div style={{ padding: '8px 0' }}>
+              <Alert message={result.message} type="error" showIcon style={{ marginBottom: 16 }} />
+              {result.error && (
+                <pre style={{ padding: 12, background: 'var(--color-error-bg)', borderRadius: 8, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+                  {result.error}
+                </pre>
+              )}
+              {result.suggestions && result.suggestions.length > 0 && (
+                <div style={{ marginTop: 12 }}>
+                  <Text strong>建议：</Text>
+                  <ul style={{ marginTop: 8, paddingLeft: 20 }}>
+                    {result.suggestions.map((s) => (
+                      <li key={s}>{s}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+            </div>
+          ),
+          okText: '知道了',
+        });
+      }
+    } catch (error) {
+      message.error('Embedding 检测请求失败');
+      console.error(error);
+    } finally {
+      setRetrievalTestingEmbedding(false);
+    }
+  };
+
+  const handleTestRerankConfig = async () => {
+    setRetrievalTestingRerank(true);
+    try {
+      const values = await retrievalForm.validateFields();
+      const result: RetrievalRerankTestResponse = await settingsApi.testRerank({ rerank: values.rerank });
+
+      if (!result.enabled) {
+        modal.info({
+          title: 'Rerank 未启用',
+          centered: true,
+          content: <Alert message={result.message || 'Rerank 未启用，无需检测'} type="info" showIcon />,
+        });
+        return;
+      }
+
+      if (result.success) {
+        modal.success({
+          title: 'Rerank 检测通过',
+          centered: true,
+          width: isMobile ? '90%' : 640,
+          content: (
+            <div style={{ padding: '8px 0' }}>
+              <Alert message={result.message} type="success" showIcon style={{ marginBottom: 16 }} />
+              <div style={{ padding: 16, background: 'var(--color-bg-layout)', borderRadius: 8 }}>
+                {result.response_time_ms !== undefined && (
+                  <div style={{ marginBottom: 8 }}>
+                    <Text type="secondary">响应时间：</Text> <Text strong>{result.response_time_ms}ms</Text>
+                  </div>
+                )}
+                {result.details && (
+                  <div>
+                    <Text type="secondary">详情：</Text>
+                    <pre style={{ marginTop: 8, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+                      {JSON.stringify(result.details, null, 2)}
+                    </pre>
+                  </div>
+                )}
+              </div>
+            </div>
+          ),
+          okText: '知道了',
+        });
+      } else {
+        modal.error({
+          title: 'Rerank 检测失败',
+          centered: true,
+          width: isMobile ? '90%' : 640,
+          content: (
+            <div style={{ padding: '8px 0' }}>
+              <Alert message={result.message} type="error" showIcon style={{ marginBottom: 16 }} />
+              {result.error && (
+                <pre style={{ padding: 12, background: 'var(--color-error-bg)', borderRadius: 8, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+                  {result.error}
+                </pre>
+              )}
+              {result.suggestions && result.suggestions.length > 0 && (
+                <div style={{ marginTop: 12 }}>
+                  <Text strong>建议：</Text>
+                  <ul style={{ marginTop: 8, paddingLeft: 20 }}>
+                    {result.suggestions.map((s) => (
+                      <li key={s}>{s}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+            </div>
+          ),
+          okText: '知道了',
+        });
+      }
+    } catch (error) {
+      message.error('Rerank 检测请求失败');
+      console.error(error);
+    } finally {
+      setRetrievalTestingRerank(false);
+    }
+  };
+
+
   const showPresetModal = (preset?: APIKeyPreset) => {
     // 重置预设模型列表状态
     setPresetModelOptions([]);
@@ -926,7 +1079,21 @@ export default function SettingsPage() {
                 : undefined
             }
           >
-            <Card size="small" title="Embedding（向量模型）" style={{ borderRadius: 8 }}>
+            <Card
+              size="small"
+              title="Embedding（向量模型）"
+              extra={
+                <Button
+                  size="small"
+                  icon={<ExperimentOutlined />}
+                  onClick={handleTestEmbeddingConfig}
+                  loading={retrievalTestingEmbedding}
+                >
+                  检测
+                </Button>
+              }
+              style={{ borderRadius: 8 }}
+            >
               <Form.Item
                 name={['embedding', 'backend']}
                 label="Embedding 后端"
@@ -999,7 +1166,21 @@ export default function SettingsPage() {
 
             <Divider style={{ margin: '12px 0' }} />
 
-            <Card size="small" title="Rerank（重排，可选）" style={{ borderRadius: 8 }}>
+            <Card
+              size="small"
+              title="Rerank（重排，可选）"
+              extra={
+                <Button
+                  size="small"
+                  icon={<ExperimentOutlined />}
+                  onClick={handleTestRerankConfig}
+                  loading={retrievalTestingRerank}
+                >
+                  检测
+                </Button>
+              }
+              style={{ borderRadius: 8 }}
+            >
               <Form.Item name={['rerank', 'enabled']} label="启用 Rerank" valuePropName="checked">
                 <Switch />
               </Form.Item>
