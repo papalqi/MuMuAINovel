@@ -278,6 +278,10 @@ class PlotAnalyzer:
             
             # 尝试解析JSON
             result = json.loads(cleaned)
+
+            # === 兼容处理：部分模型会把 suggestions 生成成对象数组 ===
+            # 前端期望 suggestions: string[]，否则会触发 React error #31（对象不能直接渲染）
+            result["suggestions"] = self._normalize_suggestions(result.get("suggestions", []))
             
             # 验证必要字段
             required_fields = ['hooks', 'plot_points', 'scores']
@@ -296,6 +300,77 @@ class PlotAnalyzer:
         except Exception as e:
             logger.error(f"❌ 解析异常: {str(e)}")
             return None
+
+    def _normalize_suggestions(self, raw: Any) -> List[str]:
+        """
+        将 AI 输出的 suggestions 规范化为 string[]
+
+        兼容常见异常结构：
+        - ["..."]（正常）
+        - [{"suggestion": "..."}, {"content": "..."}]
+        - {"suggestion": "..."} / {"content": "..."}
+        - 其他类型：强制转为字符串
+        """
+        if raw is None:
+            return []
+
+        # 单个字符串
+        if isinstance(raw, str):
+            s = raw.strip()
+            return [s] if s else []
+
+        # 单个对象
+        if isinstance(raw, dict):
+            for k in ("suggestion", "content", "text", "value", "message"):
+                v = raw.get(k)
+                if isinstance(v, str) and v.strip():
+                    return [v.strip()]
+            # 尝试单键对象
+            if len(raw) == 1:
+                v = next(iter(raw.values()))
+                if isinstance(v, str) and v.strip():
+                    return [v.strip()]
+            try:
+                return [json.dumps(raw, ensure_ascii=False)]
+            except Exception:
+                return [str(raw)]
+
+        # 列表
+        if isinstance(raw, list):
+            normalized: List[str] = []
+            for item in raw:
+                if item is None:
+                    continue
+                if isinstance(item, str):
+                    s = item.strip()
+                    if s:
+                        normalized.append(s)
+                    continue
+                if isinstance(item, dict):
+                    s = None
+                    for k in ("suggestion", "content", "text", "value", "message"):
+                        v = item.get(k)
+                        if isinstance(v, str) and v.strip():
+                            s = v.strip()
+                            break
+                    if s is None and len(item) == 1:
+                        v = next(iter(item.values()))
+                        if isinstance(v, str) and v.strip():
+                            s = v.strip()
+                    if s is None:
+                        try:
+                            s = json.dumps(item, ensure_ascii=False)
+                        except Exception:
+                            s = str(item)
+                    normalized.append(s)
+                    continue
+
+                # 其他类型（数字/布尔等）
+                normalized.append(str(item))
+            return normalized
+
+        # 其他类型
+        return [str(raw)]
     
     def extract_memories_from_analysis(
         self,

@@ -2,6 +2,7 @@
 from sqlalchemy import Column, String, Text, Integer, DateTime, ForeignKey, Float, JSON, Boolean
 from sqlalchemy.sql import func
 from app.database import Base
+import json
 import uuid
 
 
@@ -168,6 +169,71 @@ class PlotAnalysis(Base):
     def __repr__(self):
         return f"<PlotAnalysis(chapter_id={self.chapter_id[:8]}, stage={self.plot_stage}, quality={self.overall_quality_score})>"
     
+    @staticmethod
+    def _normalize_suggestions(raw) -> list:
+        """
+        兼容旧数据/异常数据：将 suggestions 规范化为 string[]
+
+        说明：
+        - 正常情况下 suggestions 应为 ['...', '...']
+        - 但部分模型会返回 [{'suggestion': '...'}] / [{'content': '...'}]
+        - 前端渲染 string[]，否则会导致白屏（React error #31）
+        """
+        if raw is None:
+            return []
+
+        if isinstance(raw, str):
+            s = raw.strip()
+            return [s] if s else []
+
+        if isinstance(raw, dict):
+            for k in ("suggestion", "content", "text", "value", "message"):
+                v = raw.get(k)
+                if isinstance(v, str) and v.strip():
+                    return [v.strip()]
+            # 单键对象兜底
+            if len(raw) == 1:
+                v = next(iter(raw.values()))
+                if isinstance(v, str) and v.strip():
+                    return [v.strip()]
+            try:
+                return [json.dumps(raw, ensure_ascii=False)]
+            except Exception:
+                return [str(raw)]
+
+        if isinstance(raw, list):
+            out = []
+            for item in raw:
+                if item is None:
+                    continue
+                if isinstance(item, str):
+                    s = item.strip()
+                    if s:
+                        out.append(s)
+                    continue
+                if isinstance(item, dict):
+                    s = None
+                    for k in ("suggestion", "content", "text", "value", "message"):
+                        v = item.get(k)
+                        if isinstance(v, str) and v.strip():
+                            s = v.strip()
+                            break
+                    if s is None and len(item) == 1:
+                        v = next(iter(item.values()))
+                        if isinstance(v, str) and v.strip():
+                            s = v.strip()
+                    if s is None:
+                        try:
+                            s = json.dumps(item, ensure_ascii=False)
+                        except Exception:
+                            s = str(item)
+                    out.append(s)
+                    continue
+                out.append(str(item))
+            return out
+
+        return [str(raw)]
+
     def to_dict(self):
         """转换为字典格式"""
         return {
@@ -193,7 +259,7 @@ class PlotAnalysis(Base):
             "engagement_score": self.engagement_score or 0.0,
             "coherence_score": self.coherence_score or 0.0,
             "analysis_report": self.analysis_report,
-            "suggestions": self.suggestions or [],
+            "suggestions": self._normalize_suggestions(self.suggestions),
             "dialogue_ratio": self.dialogue_ratio or 0.0,
             "description_ratio": self.description_ratio or 0.0,
             "created_at": self.created_at.isoformat() if self.created_at else None
