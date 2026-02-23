@@ -72,6 +72,81 @@ class AIRoutesUpdateRequest(BaseModel):
     routes: Dict[str, Optional[str]]
 
 
+# ==================== 向量检索配置（Embedding / Rerank） ====================
+#
+# 设计目标：
+# - 允许用户在前端 Settings 中配置：
+#   1) 本地 embedding（现有 sentence-transformers） 或 远端 embedding（OpenAI 兼容接口）
+#   2) 可选的远端 rerank（Cohere 兼容接口）
+# - 配置存储在 settings.preferences(JSON) 中的 retrieval 字段，避免数据库改动
+#
+
+RETRIEVAL_CONFIG_VERSION = "1.0"
+
+
+class RemoteEmbeddingConfig(BaseModel):
+    """远端 Embedding 配置（OpenAI 兼容：/v1/embeddings）。"""
+
+    # 允许字段名包含 `model_` 等受保护前缀
+    model_config = {"protected_namespaces": ()}
+
+    provider: str = "openai_compatible"
+    api_key: Optional[str] = None
+    api_base_url: Optional[str] = None  # 例如：https://api.openai.com/v1
+    model: Optional[str] = None  # 例如：text-embedding-3-small / Qwen3-Embedding-8B
+    timeout_s: int = 60
+
+
+class EmbeddingConfig(BaseModel):
+    """Embedding 配置。"""
+
+    model_config = {"protected_namespaces": ()}
+
+    backend: str = "local"  # local | remote
+    remote: RemoteEmbeddingConfig = RemoteEmbeddingConfig()
+
+
+class RemoteRerankConfig(BaseModel):
+    """远端 Rerank 配置（Cohere 兼容：/v1/rerank）。"""
+
+    model_config = {"protected_namespaces": ()}
+
+    provider: str = "cohere_compatible"
+    api_key: Optional[str] = None
+    api_base_url: Optional[str] = None  # 例如：https://api.cohere.ai/v1
+    model: Optional[str] = None
+    timeout_s: int = 60
+    top_k: int = 30  # 向量召回候选数量
+    top_n: int = 10  # rerank 后返回数量
+    min_score: Optional[float] = None  # 可选：过滤过低分
+
+
+class RerankConfig(BaseModel):
+    model_config = {"protected_namespaces": ()}
+
+    enabled: bool = False
+    remote: RemoteRerankConfig = RemoteRerankConfig()
+
+
+class RetrievalConfigResponse(BaseModel):
+    """检索配置响应。"""
+
+    model_config = {"protected_namespaces": ()}
+
+    version: str = RETRIEVAL_CONFIG_VERSION
+    embedding: EmbeddingConfig = EmbeddingConfig()
+    rerank: RerankConfig = RerankConfig()
+
+
+class RetrievalConfigUpdateRequest(BaseModel):
+    """检索配置更新请求。"""
+
+    model_config = {"protected_namespaces": ()}
+
+    embedding: EmbeddingConfig
+    rerank: RerankConfig
+
+
 def _safe_load_preferences(preferences: Optional[str]) -> Dict[str, Any]:
     if not preferences:
         return {}
@@ -116,6 +191,22 @@ def _upsert_ai_routes_to_preferences(
         "updated_at": datetime.now().isoformat(),
         "routes": routes,
     }
+    return prefs
+
+
+def _get_retrieval_from_preferences(prefs: Dict[str, Any]) -> Dict[str, Any]:
+    retrieval = prefs.get("retrieval") if isinstance(prefs, dict) else None
+    return retrieval if isinstance(retrieval, dict) else {}
+
+
+def _upsert_retrieval_to_preferences(
+    prefs: Dict[str, Any],
+    retrieval_cfg: Dict[str, Any],
+) -> Dict[str, Any]:
+    prefs = dict(prefs or {})
+    cfg = dict(retrieval_cfg or {})
+    cfg["version"] = RETRIEVAL_CONFIG_VERSION
+    prefs["retrieval"] = cfg
     return prefs
 
 
@@ -1286,6 +1377,50 @@ async def update_ai_routes(
         routes=normalized_routes,
         tasks=[AIRouteTask(**item) for item in AI_ROUTE_TASKS],
     )
+
+
+@router.get("/retrieval", response_model=RetrievalConfigResponse)
+async def get_retrieval_config(
+    user: User = Depends(require_login),
+    db: AsyncSession = Depends(get_db),
+):
+    """获取向量检索配置（Embedding / Rerank）。"""
+    settings = await get_user_settings(user.user_id, db)
+    prefs = _safe_load_preferences(settings.preferences)
+    raw = _get_retrieval_from_preferences(prefs)
+    try:
+        return RetrievalConfigResponse(**raw)
+    except Exception:
+        # 配置损坏时回退到默认
+        return RetrievalConfigResponse()
+
+
+@router.put("/retrieval", response_model=RetrievalConfigResponse)
+async def update_retrieval_config(
+    data: RetrievalConfigUpdateRequest,
+    user: User = Depends(require_login),
+    db: AsyncSession = Depends(get_db),
+):
+    """更新向量检索配置（Embedding / Rerank）。"""
+    settings = await get_user_settings(user.user_id, db)
+    prefs = _safe_load_preferences(settings.preferences)
+
+    cfg = RetrievalConfigResponse(
+        version=RETRIEVAL_CONFIG_VERSION,
+        embedding=data.embedding,
+        rerank=data.rerank,
+    )
+
+    prefs = _upsert_retrieval_to_preferences(prefs, cfg.model_dump())
+    settings.preferences = json.dumps(prefs, ensure_ascii=False)
+    await db.commit()
+
+    # 返回写入后的最终值（带默认补齐）
+    raw = _get_retrieval_from_preferences(prefs)
+    try:
+        return RetrievalConfigResponse(**raw)
+    except Exception:
+        return RetrievalConfigResponse()
 
 
 @router.post("/presets/{preset_id}/test")

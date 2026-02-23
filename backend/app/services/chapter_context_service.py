@@ -646,14 +646,21 @@ class OneToManyContextBuilder:
                 project_id=project_id,
                 query=query_text,
                 limit=15,
-                min_importance=0.0
+                min_importance=0.0,
+                db=db,
             )
             
-            # 过滤相关度>0.6
-            filtered_memories = [
-                mem for mem in relevant_memories
-                if mem.get('similarity', 0) > self.MEMORY_SIMILARITY_THRESHOLD
-            ]
+            # 过滤策略：
+            # - 未启用 rerank：沿用原逻辑（相似度阈值）
+            # - 启用 rerank：不再用相似度硬过滤，避免把高 rerank 分但低相似度的条目误删
+            use_rerank = any(mem.get("rerank_score") is not None for mem in relevant_memories)
+            if use_rerank:
+                filtered_memories = relevant_memories
+            else:
+                filtered_memories = [
+                    mem for mem in relevant_memories
+                    if mem.get('similarity', 0) > self.MEMORY_SIMILARITY_THRESHOLD
+                ]
             
             if not filtered_memories:
                 return None
@@ -661,8 +668,16 @@ class OneToManyContextBuilder:
             memory_lines = ["【相关记忆】"]
             for mem in filtered_memories[:self.MEMORY_COUNT]:
                 similarity = mem.get('similarity', 0)
+                rerank_score = mem.get("rerank_score")
                 content = mem.get('content', '')[:100]
-                memory_lines.append(f"- (相关度:{similarity:.2f}) {content}")
+                if rerank_score is not None:
+                    try:
+                        rs = float(rerank_score)
+                        memory_lines.append(f"- (重排分:{rs:.3f}|相似度:{similarity:.2f}) {content}")
+                    except Exception:
+                        memory_lines.append(f"- (重排分:{rerank_score}|相似度:{similarity:.2f}) {content}")
+                else:
+                    memory_lines.append(f"- (相关度:{similarity:.2f}) {content}")
             
             return "\n".join(memory_lines) if len(memory_lines) > 1 else None
             
@@ -782,7 +797,8 @@ class OneToManyContextBuilder:
         project_id: str,
         chapter_number: int,
         chapter_outline: str,
-        limit: int = 3
+        limit: int = 3,
+        db: Optional[AsyncSession] = None,
     ) -> Optional[str]:
         """
         获取与本章最相关的记忆
@@ -799,7 +815,8 @@ class OneToManyContextBuilder:
                 project_id=project_id,
                 query=chapter_outline,
                 limit=limit,
-                min_importance=self.MEMORY_IMPORTANCE_THRESHOLD
+                min_importance=self.MEMORY_IMPORTANCE_THRESHOLD,
+                db=db,
             )
             
             return self._format_memories(relevant, max_length=500)
@@ -1147,21 +1164,36 @@ class OneToOneContextBuilder:
                     project_id=project.id,
                     query=query_text,
                     limit=15,
-                    min_importance=0.0
+                    min_importance=0.0,
+                    db=db,
                 )
                 
-                # 过滤相关度阈值为0.6
-                filtered_memories = [
-                    mem for mem in relevant_memories
-                    if mem.get('similarity', 0) > 0.6
-                ]
+                # 过滤策略：
+                # - 未启用 rerank：沿用原逻辑（相似度阈值）
+                # - 启用 rerank：不再用相似度硬过滤
+                use_rerank = any(mem.get("rerank_score") is not None for mem in relevant_memories)
+                if use_rerank:
+                    filtered_memories = relevant_memories
+                else:
+                    filtered_memories = [
+                        mem for mem in relevant_memories
+                        if mem.get('similarity', 0) > 0.6
+                    ]
                 
                 if filtered_memories:
                     memory_lines = ["【相关记忆】"]
                     for mem in filtered_memories[:10]:  # 最多显示10条
                         similarity = mem.get('similarity', 0)
                         content = mem.get('content', '')[:100]
-                        memory_lines.append(f"- (相关度:{similarity:.2f}) {content}")
+                        rerank_score = mem.get("rerank_score")
+                        if rerank_score is not None:
+                            try:
+                                rs = float(rerank_score)
+                                memory_lines.append(f"- (重排分:{rs:.3f}|相似度:{similarity:.2f}) {content}")
+                            except Exception:
+                                memory_lines.append(f"- (重排分:{rerank_score}|相似度:{similarity:.2f}) {content}")
+                        else:
+                            memory_lines.append(f"- (相关度:{similarity:.2f}) {content}")
                     
                     context.relevant_memories = "\n".join(memory_lines)
                     logger.info(f"  ✅ P2-相关记忆: {len(filtered_memories)}条 (相关度>0.6, 共搜索{len(relevant_memories)}条)")
@@ -1592,4 +1624,3 @@ class OneToOneContextBuilder:
         except Exception as e:
             logger.error(f"❌ 获取伏笔提醒失败: {str(e)}")
             return None
-

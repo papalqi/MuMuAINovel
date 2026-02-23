@@ -89,6 +89,50 @@ export interface AIRoutesResponse {
   tasks: AIRouteTask[];
 }
 
+// ========== 向量检索（Embedding / Rerank）配置 ==========
+
+export type EmbeddingBackend = 'local' | 'remote';
+
+export interface RemoteEmbeddingConfig {
+  provider: string; // openai_compatible
+  api_key?: string | null;
+  api_base_url?: string | null; // 例如：https://api.openai.com/v1
+  model?: string | null;        // 例如：text-embedding-3-small / Qwen3-Embedding-8B
+  timeout_s?: number;
+}
+
+export interface EmbeddingConfig {
+  backend: EmbeddingBackend;
+  remote: RemoteEmbeddingConfig;
+}
+
+export interface RemoteRerankConfig {
+  provider: string; // cohere_compatible
+  api_key?: string | null;
+  api_base_url?: string | null; // 例如：https://api.cohere.ai/v1
+  model?: string | null;
+  timeout_s?: number;
+  top_k?: number;   // 向量召回候选数量
+  top_n?: number;   // rerank 后返回数量
+  min_score?: number | null;
+}
+
+export interface RerankConfig {
+  enabled: boolean;
+  remote: RemoteRerankConfig;
+}
+
+export interface RetrievalConfigResponse {
+  version: string;
+  embedding: EmbeddingConfig;
+  rerank: RerankConfig;
+}
+
+export interface RetrievalConfigUpdateRequest {
+  embedding: EmbeddingConfig;
+  rerank: RerankConfig;
+}
+
 // LinuxDO 授权 URL 响应
 export interface AuthUrlResponse {
   auth_url: string;

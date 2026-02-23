@@ -1133,7 +1133,8 @@ async def analyze_chapter_background(
             added_count = await memory_service.batch_add_memories(
                 user_id=user_id,
                 project_id=project_id,
-                memories=memory_records
+                memories=memory_records,
+                db=db_session,
             )
             logger.info(f"✅ 添加{added_count}条记忆到向量库")
         

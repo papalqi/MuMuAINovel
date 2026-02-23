@@ -172,7 +172,8 @@ async def analyze_chapter(
                 memory_id=memory_id,
                 content=mem_data['content'],
                 memory_type=mem_data['type'],
-                metadata=mem_data['metadata']
+                metadata=mem_data['metadata'],
+                db=db,
             )
             saved_count += 1
         
@@ -315,7 +316,8 @@ async def search_memories(
             query=query,
             memory_types=memory_types,
             limit=limit,
-            min_importance=min_importance
+            min_importance=min_importance,
+            db=db,
         )
         
         return {
@@ -348,7 +350,8 @@ async def get_unresolved_foreshadows(
         foreshadows = await memory_service.find_unresolved_foreshadows(
             user_id=user_id,
             project_id=project_id,
-            current_chapter=current_chapter
+            current_chapter=current_chapter,
+            db=db,
         )
         
         return {
@@ -377,7 +380,8 @@ async def get_memory_stats(
         
         stats = await memory_service.get_memory_stats(
             user_id=user_id,
-            project_id=project_id
+            project_id=project_id,
+            db=db,
         )
         
         return {
