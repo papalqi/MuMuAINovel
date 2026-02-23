@@ -118,11 +118,12 @@ export default function ProjectList() {
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const handleEnterProject = async (project: any) => {
-    if (project.wizard_status === 'incomplete') {
-      navigate(`/wizard?project_id=${project.id}`);
-    } else {
-      navigate(`/project/${project.id}`);
-    }
+    // ✅ 新策略：项目初始化只要求“世界观完成”即可进入项目
+    // 兼容旧数据：如果 wizard_status 仍为 incomplete，但 wizard_step >= 1（世界观已生成），也允许直接进入项目
+    const wizardStep = project?.wizard_step || 0;
+    const trulyIncomplete = project?.wizard_status === 'incomplete' && wizardStep < 1;
+    if (trulyIncomplete) navigate(`/wizard?project_id=${project.id}`);
+    else navigate(`/project/${project.id}`);
   };
 
   const getStatusTag = (status: string) => {
@@ -850,7 +851,10 @@ export default function ProjectList() {
 
                 {Array.isArray(projects) && projects.map((project) => {
                     const progress = getProgress(project.current_words, project.target_words || 0);
-                    const isWizardIncomplete = project.wizard_status === 'incomplete';
+                    // ✅ 只有“世界观都没生成”的项目，才算真正的向导未完成
+                    // 兼容旧数据：wizard_status=incomplete 但 wizard_step>=1 的项目，允许正常进入并显示常规状态
+                    const wizardStep = project.wizard_step || 0;
+                    const isWizardIncomplete = project.wizard_status === 'incomplete' && wizardStep < 1;
                     // 解析标签（假设存储在 genre 字段，用逗号或顿号分隔）
                     const tags = project.genre ? project.genre.split(/[,、，]/).map((t: string) => t.trim()).filter((t: string) => t) : [];
 

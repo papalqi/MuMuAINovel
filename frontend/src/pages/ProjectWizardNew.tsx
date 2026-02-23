@@ -82,7 +82,7 @@ export default function ProjectWizardNew() {
       genre: values.genre,
       narrative_perspective: values.narrative_perspective,
       target_words: values.target_words || 100000,
-      chapter_count: 3, // 默认生成3章大纲
+      chapter_count: 3, // 初始化仅生成世界观，此处作为项目配置占位
       character_count: values.character_count || 5,
       outline_mode: values.outline_mode || 'one-to-many', // 添加大纲模式
     };
@@ -109,7 +109,7 @@ export default function ProjectWizardNew() {
         创建新项目
       </Title>
       <Paragraph type="secondary" style={{ marginBottom: 32 }}>
-        填写基本信息后，AI将自动为您生成世界观、角色和大纲节点（大纲可在项目内手动展开为章节）
+        填写基本信息后，AI将自动为您生成世界观（职业/角色/大纲可在项目内按需生成）
       </Paragraph>
 
       <Form

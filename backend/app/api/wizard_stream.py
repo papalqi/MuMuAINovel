@@ -213,7 +213,9 @@ async def world_building_generator(
             chapter_count=chapter_count,
             character_count=character_count,
             outline_mode=outline_mode,  # 设置大纲模式
-            wizard_status="incomplete",
+            # ✅ 新策略：创建项目时只初始化世界观即可视为“可进入项目”
+            # 职业/角色/大纲改为项目内按需生成，不再强制走完整向导流程
+            wizard_status="completed",
             wizard_step=1,
             status="planning"
         )
@@ -247,6 +249,8 @@ async def world_building_generator(
         # 更新向导步骤状态为1（世界观已完成）
         # wizard_step: 0=未开始, 1=世界观已完成, 2=职业体系已完成, 3=角色已完成, 4=大纲已完成
         project.wizard_step = 1
+        # 确保状态为 completed（防止未来逻辑改动导致回退）
+        project.wizard_status = "completed"
         await db.commit()
         
         # ===== 世界观生成完成 =====
