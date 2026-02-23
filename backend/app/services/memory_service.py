@@ -493,7 +493,8 @@ class MemoryService:
         async with httpx.AsyncClient(timeout=timeout_s) as client:
             for i in range(0, len(texts), batch_size):
                 chunk = texts[i:i + batch_size]
-                payload = {"model": model, "input": chunk}
+                # 部分 OpenAI-兼容服务（例如 ModelScope）要求显式传入 encoding_format
+                payload = {"model": model, "input": chunk, "encoding_format": "float"}
                 resp = await client.post(url, headers=headers, json=payload)
                 resp.raise_for_status()
                 data = resp.json()
