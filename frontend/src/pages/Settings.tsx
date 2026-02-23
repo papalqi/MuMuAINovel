@@ -1,8 +1,8 @@
 import { useState, useEffect } from 'react';
-import { Card, Form, Input, Button, Select, Slider, InputNumber, message, Space, Typography, Spin, Modal, Alert, Grid, Tabs, List, Tag, Popconfirm, Empty, Row, Col } from 'antd';
+import { Card, Form, Input, Button, Select, Slider, InputNumber, message, Space, Typography, Spin, Modal, Alert, Grid, Tabs, List, Tag, Popconfirm, Empty, Row, Col, Switch, Divider } from 'antd';
 import { SaveOutlined, DeleteOutlined, ReloadOutlined, InfoCircleOutlined, CheckCircleOutlined, CloseCircleOutlined, ThunderboltOutlined, PlusOutlined, EditOutlined, CopyOutlined, WarningOutlined } from '@ant-design/icons';
 import { settingsApi, mcpPluginApi } from '../services/api';
-import type { SettingsUpdate, APIKeyPreset, PresetCreateRequest, APIKeyPresetConfig, AIRouteTask } from '../types';
+import type { SettingsUpdate, APIKeyPreset, PresetCreateRequest, APIKeyPresetConfig, AIRouteTask, RetrievalConfigResponse, RetrievalConfigUpdateRequest } from '../types';
 import { eventBus, EventNames } from '../store/eventBus';
 
 const { Title, Text } = Typography;
@@ -56,6 +56,13 @@ export default function SettingsPage() {
   const [aiRouteTasks, setAiRouteTasks] = useState<AIRouteTask[]>([]);
   const [aiRoutesDirty, setAiRoutesDirty] = useState(false);
 
+  // 向量检索（Embedding / Rerank）配置
+  const [retrievalLoading, setRetrievalLoading] = useState(false);
+  const [retrievalSaving, setRetrievalSaving] = useState(false);
+  const [retrievalDirty, setRetrievalDirty] = useState(false);
+  const [retrievalConfig, setRetrievalConfig] = useState<RetrievalConfigResponse | null>(null);
+  const [retrievalForm] = Form.useForm<RetrievalConfigUpdateRequest>();
+
   useEffect(() => {
     loadSettings();
     if (activeTab === 'presets') {
@@ -71,6 +78,8 @@ export default function SettingsPage() {
       // 路由设置依赖预设列表
       loadPresets();
       loadAiRoutes();
+    } else if (activeTab === 'retrieval') {
+      loadRetrievalConfig();
     } else if (activeTab === 'current') {
       // 切换到当前配置Tab时，刷新设置以获取最新数据
       loadSettings();
@@ -439,6 +448,50 @@ export default function SettingsPage() {
       console.error(error);
     } finally {
       setAiRoutesSaving(false);
+    }
+  };
+
+  // ========== 向量检索设置（Embedding / Rerank） ==========
+
+  const loadRetrievalConfig = async () => {
+    setRetrievalLoading(true);
+    try {
+      const cfg = await settingsApi.getRetrievalConfig();
+      setRetrievalConfig(cfg);
+      retrievalForm.setFieldsValue({
+        embedding: cfg.embedding,
+        rerank: cfg.rerank,
+      });
+      setRetrievalDirty(false);
+    } catch (error) {
+      message.error('加载向量检索配置失败');
+      console.error(error);
+    } finally {
+      setRetrievalLoading(false);
+    }
+  };
+
+  const handleSaveRetrievalConfig = async () => {
+    setRetrievalSaving(true);
+    try {
+      const values = await retrievalForm.validateFields();
+      const payload: RetrievalConfigUpdateRequest = {
+        embedding: values.embedding,
+        rerank: values.rerank,
+      };
+      const saved = await settingsApi.updateRetrievalConfig(payload);
+      setRetrievalConfig(saved);
+      retrievalForm.setFieldsValue({
+        embedding: saved.embedding,
+        rerank: saved.rerank,
+      });
+      setRetrievalDirty(false);
+      message.success('向量检索配置已保存');
+    } catch (error) {
+      message.error('保存向量检索配置失败');
+      console.error(error);
+    } finally {
+      setRetrievalSaving(false);
     }
   };
 
@@ -819,6 +872,216 @@ export default function SettingsPage() {
       default:
         return 'default';
     }
+  };
+
+  // ========== 渲染向量检索配置（Embedding / Rerank） ==========
+
+  const renderRetrievalSettings = () => {
+    return (
+      <Spin spinning={retrievalLoading}>
+        <Space direction="vertical" size="middle" style={{ width: '100%' }}>
+          <Alert
+            type="info"
+            showIcon
+            message="向量检索：Embedding / Rerank"
+            description={
+              <div style={{ fontSize: isMobile ? 12 : 13 }}>
+                <p style={{ margin: '8px 0' }}>
+                  这里的配置用于 <strong>相关记忆检索</strong>（章节生成提示词中的「相关记忆」块）。
+                  你可以选择使用远端 Embedding（OpenAI 兼容 /v1/embeddings），并可选开启远端 Rerank（Cohere 兼容 /v1/rerank）进行重排。
+                </p>
+                <p style={{ margin: 0 }}>
+                  <strong>注意：</strong>切换 Embedding 后，旧向量不会自动迁移。你需要重新分析章节（或重建向量库）才能让旧章节的记忆参与检索。
+                </p>
+              </div>
+            }
+          />
+
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <Text type="secondary">修改后记得点击保存</Text>
+            <Space>
+              <Button icon={<ReloadOutlined />} onClick={loadRetrievalConfig} disabled={retrievalLoading}>
+                重新加载
+              </Button>
+              <Button
+                type="primary"
+                icon={<SaveOutlined />}
+                onClick={handleSaveRetrievalConfig}
+                loading={retrievalSaving}
+                disabled={!retrievalDirty}
+              >
+                保存
+              </Button>
+            </Space>
+          </div>
+
+          <Form
+            form={retrievalForm}
+            layout="vertical"
+            onValuesChange={() => setRetrievalDirty(true)}
+            autoComplete="off"
+            initialValues={
+              retrievalConfig
+                ? { embedding: retrievalConfig.embedding, rerank: retrievalConfig.rerank }
+                : undefined
+            }
+          >
+            <Card size="small" title="Embedding（向量模型）" style={{ borderRadius: 8 }}>
+              <Form.Item
+                name={['embedding', 'backend']}
+                label="Embedding 后端"
+                rules={[{ required: true, message: '请选择 Embedding 后端' }]}
+              >
+                <Select
+                  options={[
+                    { value: 'local', label: '本地（Sentence-Transformers）' },
+                    { value: 'remote', label: '远端（OpenAI 兼容 /v1/embeddings）' },
+                  ]}
+                />
+              </Form.Item>
+
+              <Form.Item shouldUpdate={(p, c) => p?.embedding?.backend !== c?.embedding?.backend} noStyle>
+                {() => {
+                  const backend = retrievalForm.getFieldValue(['embedding', 'backend']);
+                  if (backend !== 'remote') return null;
+
+                  return (
+                    <>
+                      <Row gutter={16}>
+                        <Col xs={24} sm={8}>
+                          <Form.Item name={['embedding', 'remote', 'provider']} label="协议/Provider">
+                            <Select
+                              options={[
+                                { value: 'openai_compatible', label: 'OpenAI 兼容' },
+                              ]}
+                            />
+                          </Form.Item>
+                        </Col>
+                        <Col xs={24} sm={16}>
+                          <Form.Item
+                            name={['embedding', 'remote', 'model']}
+                            label="Embedding 模型"
+                            rules={[{ required: true, message: '请输入 Embedding 模型名称' }]}
+                          >
+                            <Input placeholder="例如：text-embedding-3-small / Qwen3-Embedding-8B" />
+                          </Form.Item>
+                        </Col>
+                      </Row>
+
+                      <Form.Item
+                        name={['embedding', 'remote', 'api_base_url']}
+                        label="Embedding API 地址"
+                        extra="留空则复用「当前配置」的 API 地址（建议显式填写，以避免后续修改 LLM 配置时影响 embedding）"
+                      >
+                        <Input placeholder="https://api.openai.com/v1" />
+                      </Form.Item>
+
+                      <Form.Item
+                        name={['embedding', 'remote', 'api_key']}
+                        label="Embedding API Key"
+                        extra="留空则复用「当前配置」的 API Key"
+                      >
+                        <Input.Password placeholder="sk-..." autoComplete="new-password" />
+                      </Form.Item>
+
+                      <Row gutter={16}>
+                        <Col xs={24} sm={8}>
+                          <Form.Item name={['embedding', 'remote', 'timeout_s']} label="超时(s)">
+                            <InputNumber min={1} max={600} style={{ width: '100%' }} />
+                          </Form.Item>
+                        </Col>
+                      </Row>
+                    </>
+                  );
+                }}
+              </Form.Item>
+            </Card>
+
+            <Divider style={{ margin: '12px 0' }} />
+
+            <Card size="small" title="Rerank（重排，可选）" style={{ borderRadius: 8 }}>
+              <Form.Item name={['rerank', 'enabled']} label="启用 Rerank" valuePropName="checked">
+                <Switch />
+              </Form.Item>
+
+              <Form.Item shouldUpdate={(p, c) => p?.rerank?.enabled !== c?.rerank?.enabled} noStyle>
+                {() => {
+                  const enabled = retrievalForm.getFieldValue(['rerank', 'enabled']);
+                  if (!enabled) return null;
+
+                  return (
+                    <>
+                      <Row gutter={16}>
+                        <Col xs={24} sm={8}>
+                          <Form.Item name={['rerank', 'remote', 'provider']} label="协议/Provider">
+                            <Select
+                              options={[
+                                { value: 'cohere_compatible', label: 'Cohere 兼容 (/v1/rerank)' },
+                              ]}
+                            />
+                          </Form.Item>
+                        </Col>
+                        <Col xs={24} sm={16}>
+                          <Form.Item
+                            name={['rerank', 'remote', 'model']}
+                            label="Rerank 模型"
+                            rules={[{ required: true, message: '请输入 Rerank 模型名称' }]}
+                          >
+                            <Input placeholder="例如：rerank-xxx / bge-reranker-large 等（取决于你的服务）" />
+                          </Form.Item>
+                        </Col>
+                      </Row>
+
+                      <Form.Item
+                        name={['rerank', 'remote', 'api_base_url']}
+                        label="Rerank API 地址"
+                        extra="留空则复用「当前配置」的 API 地址"
+                      >
+                        <Input placeholder="https://api.cohere.ai/v1" />
+                      </Form.Item>
+
+                      <Form.Item
+                        name={['rerank', 'remote', 'api_key']}
+                        label="Rerank API Key"
+                        extra="留空则复用「当前配置」的 API Key"
+                      >
+                        <Input.Password placeholder="..." autoComplete="new-password" />
+                      </Form.Item>
+
+                      <Row gutter={16}>
+                        <Col xs={24} sm={8}>
+                          <Form.Item name={['rerank', 'remote', 'top_k']} label="候选数 top_k">
+                            <InputNumber min={5} max={200} style={{ width: '100%' }} />
+                          </Form.Item>
+                        </Col>
+                        <Col xs={24} sm={8}>
+                          <Form.Item name={['rerank', 'remote', 'top_n']} label="返回数 top_n">
+                            <InputNumber min={1} max={200} style={{ width: '100%' }} />
+                          </Form.Item>
+                        </Col>
+                        <Col xs={24} sm={8}>
+                          <Form.Item name={['rerank', 'remote', 'timeout_s']} label="超时(s)">
+                            <InputNumber min={1} max={600} style={{ width: '100%' }} />
+                          </Form.Item>
+                        </Col>
+                      </Row>
+
+                      <Row gutter={16}>
+                        <Col xs={24} sm={8}>
+                          <Form.Item name={['rerank', 'remote', 'min_score']} label="最低分(min_score)">
+                            <InputNumber min={0} max={1} step={0.01} style={{ width: '100%' }} />
+                          </Form.Item>
+                        </Col>
+                      </Row>
+                    </>
+                  );
+                }}
+              </Form.Item>
+            </Card>
+          </Form>
+        </Space>
+      </Spin>
+    );
   };
 
   // ========== 渲染 AI 路由配置 ==========
@@ -1698,6 +1961,11 @@ export default function SettingsPage() {
                   key: 'ai_routes',
                   label: '请求分流',
                   children: renderAiRoutes(),
+                },
+                {
+                  key: 'retrieval',
+                  label: '向量检索',
+                  children: renderRetrievalSettings(),
                 },
               ]}
             />

@@ -50,6 +50,8 @@ import type {
   PresetUpdateRequest,
   PresetListResponse,
   AIRoutesResponse,
+  RetrievalConfigResponse,
+  RetrievalConfigUpdateRequest,
   ChapterPlanItem,
 } from '../types';
 
@@ -282,6 +284,13 @@ export const settingsApi = {
 
   updateAiRoutes: (data: { routes: Record<string, string | null> }) =>
     api.put<unknown, AIRoutesResponse>('/settings/ai-routes', data),
+
+  // 向量检索（Embedding / Rerank）
+  getRetrievalConfig: () =>
+    api.get<unknown, RetrievalConfigResponse>('/settings/retrieval'),
+
+  updateRetrievalConfig: (data: RetrievalConfigUpdateRequest) =>
+    api.put<unknown, RetrievalConfigResponse>('/settings/retrieval', data),
 };
 
 export const projectApi = {

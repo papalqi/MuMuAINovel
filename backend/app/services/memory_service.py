@@ -1,4 +1,5 @@
 """向量记忆服务 - 基于ChromaDB实现长期记忆和语义检索"""
+import asyncio
 import chromadb
 from sentence_transformers import SentenceTransformer
 from typing import List, Dict, Any, Optional
@@ -7,6 +8,13 @@ from datetime import datetime
 from app.logger import get_logger
 import os
 import hashlib
+import httpx
+from urllib.parse import urljoin
+
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.models.settings import Settings
 
 logger = get_logger(__name__)
 
@@ -216,18 +224,25 @@ class MemoryService:
                     logger.error("   或手动下载模型文件到 embedding 目录")
                     logger.error(f"💡 期望的模型目录结构:")
                     logger.error(f"   {os.path.abspath(model_cache_dir)}/models--sentence-transformers--paraphrase-multilingual-MiniLM-L12-v2/")
-                    raise RuntimeError("无法加载任何Embedding模型")
+                    # ⚠️ 不再阻断服务启动：
+                    # - 如果用户选择“远端 Embedding”，本地模型不可用也可以工作
+                    # - 若后续仍使用本地 embedding，会在调用时抛错并提示
+                    self.embedding_model = None
+                    logger.warning("⚠️ MemoryService 将以“无本地Embedding模型”模式继续运行（可配置远端Embedding）")
             
             self._initialized = True
             logger.info("✅ MemoryService初始化成功")
             logger.info(f"  - ChromaDB目录: {chroma_dir}")
-            logger.info(f"  - Embedding模型: paraphrase-multilingual-MiniLM-L12-v2")
+            logger.info(
+                "  - Embedding模型: "
+                + ("paraphrase-multilingual-MiniLM-L12-v2" if self.embedding_model else "未加载（可使用远端Embedding）")
+            )
             
         except Exception as e:
             logger.error(f"❌ MemoryService初始化失败: {str(e)}")
             raise
     
-    def get_collection(self, user_id: str, project_id: str):
+    def get_collection(self, user_id: str, project_id: str, embed_id: str = "local"):
         """
         获取或创建项目的记忆集合
         
@@ -247,11 +262,22 @@ class MemoryService:
         # 4. 不能包含连续的点(..)
         # 5. 不能是有效的IPv4地址
         
-        # 使用SHA256哈希压缩ID长度，确保不超过63字符
-        # 格式: u_{user_hash}_p_{project_hash} (约30字符)
+        # 使用SHA256哈希压缩ID长度，确保不超过63字符。
+        # 同一 user+project 在不同 embedding 配置下需要使用不同 collection，
+        # 否则会出现向量维度不一致的问题。
+        #
+        # 格式:
+        # - 旧版（本地 embedding，向后兼容）: u_{user_hash}_p_{project_hash}
+        # - 新版（远端 embedding）: u_{user_hash}_p_{project_hash}_e_{embed_hash}
         user_hash = hashlib.sha256(user_id.encode()).hexdigest()[:8]
         project_hash = hashlib.sha256(project_id.encode()).hexdigest()[:8]
-        collection_name = f"u_{user_hash}_p_{project_hash}"
+        embed_id_norm = str(embed_id or "local")
+
+        if embed_id_norm in ("local", "default"):
+            collection_name = f"u_{user_hash}_p_{project_hash}"
+        else:
+            embed_hash = hashlib.sha256(embed_id_norm.encode()).hexdigest()[:8]
+            collection_name = f"u_{user_hash}_p_{project_hash}_e_{embed_hash}"
         
         try:
             return self.client.get_or_create_collection(
@@ -259,12 +285,294 @@ class MemoryService:
                 metadata={
                     "user_id": user_id,
                     "project_id": project_id,
+                    "embed_id": embed_id_norm[:200],
                     "created_at": datetime.now().isoformat()
                 }
             )
         except Exception as e:
             logger.error(f"❌ 获取collection失败: {str(e)}")
             raise
+
+    # ==================== Retrieval Settings / Remote Backend ====================
+
+    @staticmethod
+    def _safe_load_prefs(preferences: Optional[str]) -> Dict[str, Any]:
+        if not preferences:
+            return {}
+        try:
+            raw = json.loads(preferences)
+            return raw if isinstance(raw, dict) else {}
+        except json.JSONDecodeError:
+            return {}
+
+    @staticmethod
+    def _collection_prefix(user_id: str, project_id: str) -> str:
+        user_hash = hashlib.sha256(user_id.encode()).hexdigest()[:8]
+        project_hash = hashlib.sha256(project_id.encode()).hexdigest()[:8]
+        return f"u_{user_hash}_p_{project_hash}"
+
+    def _list_project_collection_names(self, user_id: str, project_id: str) -> List[str]:
+        """
+        列出当前 user+project 对应的所有 collection（包含旧版 local 与新版 remote）。
+        用于清理场景（删除章节、删除项目等）。
+        """
+        prefix = self._collection_prefix(user_id, project_id)
+        try:
+            cols = self.client.list_collections()
+            names: List[str] = []
+            for c in cols or []:
+                name = getattr(c, "name", None) or (c.get("name") if isinstance(c, dict) else None)
+                if not name:
+                    continue
+                if name == prefix or str(name).startswith(prefix + "_e_"):
+                    names.append(str(name))
+            return names
+        except Exception as e:
+            logger.warning(f"⚠️ 列出 collection 失败，将仅使用默认 collection: {e}")
+            return [prefix]
+
+    async def _get_user_settings_and_retrieval(
+        self,
+        user_id: str,
+        db: Optional[AsyncSession],
+    ) -> tuple[Optional[Settings], Dict[str, Any]]:
+        """
+        返回 (Settings对象, retrieval配置dict)。db 为空时返回 (None, {})。
+        """
+        if not db or not user_id:
+            return None, {}
+
+        try:
+            result = await db.execute(select(Settings).where(Settings.user_id == user_id))
+            settings = result.scalar_one_or_none()
+            prefs = self._safe_load_prefs(settings.preferences if settings else None)
+            retrieval = prefs.get("retrieval") if isinstance(prefs.get("retrieval"), dict) else {}
+            return settings, (retrieval if isinstance(retrieval, dict) else {})
+        except Exception as e:
+            logger.warning(f"⚠️ 读取用户检索配置失败，回退本地 embedding: {e}")
+            return None, {}
+
+    @staticmethod
+    def _resolve_embedding_backend(
+        retrieval: Dict[str, Any],
+        settings: Optional[Settings],
+    ) -> Dict[str, Any]:
+        """
+        解析 embedding 配置。
+
+        返回：
+        - backend: local | remote
+        - embed_id: 用于 collection 隔离
+        - (remote 额外字段): provider/api_key/api_base_url/model/timeout_s
+        """
+        embedding_cfg = retrieval.get("embedding") if isinstance(retrieval.get("embedding"), dict) else {}
+        backend = str(embedding_cfg.get("backend") or "local").lower()
+
+        if backend == "remote":
+            remote = embedding_cfg.get("remote") if isinstance(embedding_cfg.get("remote"), dict) else {}
+            provider = str(remote.get("provider") or "openai_compatible")
+            model = remote.get("model")
+            api_base_url = remote.get("api_base_url") or (settings.api_base_url if settings else None)
+            api_key = remote.get("api_key") or (settings.api_key if settings else None)
+            timeout_s = int(remote.get("timeout_s") or 60)
+
+            if api_base_url and model:
+                embed_id = f"remote:{provider}:{api_base_url}:{model}"
+                return {
+                    "backend": "remote",
+                    "embed_id": embed_id,
+                    "provider": provider,
+                    "api_key": api_key,
+                    "api_base_url": api_base_url,
+                    "model": model,
+                    "timeout_s": timeout_s,
+                }
+
+        # fallback：本地
+        return {"backend": "local", "embed_id": "local"}
+
+    @staticmethod
+    def _resolve_rerank_backend(
+        retrieval: Dict[str, Any],
+        settings: Optional[Settings],
+    ) -> Dict[str, Any]:
+        rerank_cfg = retrieval.get("rerank") if isinstance(retrieval.get("rerank"), dict) else {}
+        enabled = bool(rerank_cfg.get("enabled"))
+        if not enabled:
+            return {"enabled": False}
+
+        remote = rerank_cfg.get("remote") if isinstance(rerank_cfg.get("remote"), dict) else {}
+        provider = str(remote.get("provider") or "cohere_compatible")
+        model = remote.get("model")
+        api_base_url = remote.get("api_base_url") or (settings.api_base_url if settings else None)
+        api_key = remote.get("api_key") or (settings.api_key if settings else None)
+        timeout_s = int(remote.get("timeout_s") or 60)
+        top_k = int(remote.get("top_k") or 30)
+        top_n = int(remote.get("top_n") or 10)
+        min_score = remote.get("min_score")
+        try:
+            min_score = float(min_score) if min_score is not None else None
+        except Exception:
+            min_score = None
+
+        if api_base_url and model:
+            return {
+                "enabled": True,
+                "provider": provider,
+                "api_key": api_key,
+                "api_base_url": api_base_url,
+                "model": model,
+                "timeout_s": timeout_s,
+                "top_k": max(1, top_k),
+                "top_n": max(1, top_n),
+                "min_score": min_score,
+            }
+
+        # 配置不完整则禁用
+        return {"enabled": False}
+
+    @staticmethod
+    def _build_openai_compatible_url(api_base_url: str, endpoint: str) -> str:
+        """
+        将形如 https://host/v1 + embeddings -> https://host/v1/embeddings
+        """
+        base = (api_base_url or "").rstrip("/")
+        if base.endswith("/" + endpoint.strip("/")):
+            return base
+        return urljoin(base + "/", endpoint.lstrip("/"))
+
+    async def _embed_texts(
+        self,
+        texts: List[str],
+        embed_backend: Dict[str, Any],
+    ) -> List[List[float]]:
+        backend = embed_backend.get("backend") or "local"
+
+        if backend == "remote":
+            provider = embed_backend.get("provider")
+            if provider != "openai_compatible":
+                # 当前仅内置 OpenAI 兼容 embedding；其他 provider 先按兼容处理
+                provider = "openai_compatible"
+            return await self._embed_texts_remote_openai_compatible(
+                api_base_url=str(embed_backend.get("api_base_url") or ""),
+                api_key=str(embed_backend.get("api_key") or ""),
+                model=str(embed_backend.get("model") or ""),
+                texts=texts,
+                timeout_s=int(embed_backend.get("timeout_s") or 60),
+            )
+
+        # local
+        if not self.embedding_model:
+            raise RuntimeError("本地Embedding模型未加载：请检查本地模型文件，或在设置中启用远端Embedding。")
+
+        # sentence-transformers 对 list 输入返回 List[List[float]]
+        vectors = await asyncio.to_thread(self.embedding_model.encode, texts)
+        return vectors.tolist() if hasattr(vectors, "tolist") else vectors
+
+    async def _embed_texts_remote_openai_compatible(
+        self,
+        *,
+        api_base_url: str,
+        api_key: str,
+        model: str,
+        texts: List[str],
+        timeout_s: int = 60,
+        batch_size: int = 64,
+    ) -> List[List[float]]:
+        if not api_base_url or not model:
+            raise ValueError("远端Embedding配置不完整：api_base_url / model 不能为空")
+
+        url = self._build_openai_compatible_url(api_base_url, "embeddings")
+
+        headers: Dict[str, str] = {"Content-Type": "application/json"}
+        if api_key:
+            headers["Authorization"] = f"Bearer {api_key}"
+
+        embeddings: List[List[float]] = []
+
+        async with httpx.AsyncClient(timeout=timeout_s) as client:
+            for i in range(0, len(texts), batch_size):
+                chunk = texts[i:i + batch_size]
+                payload = {"model": model, "input": chunk}
+                resp = await client.post(url, headers=headers, json=payload)
+                resp.raise_for_status()
+                data = resp.json()
+                items = data.get("data") or []
+                # OpenAI 格式：data=[{index, embedding, ...}]
+                try:
+                    items = sorted(items, key=lambda x: int(x.get("index", 0)))
+                except Exception:
+                    pass
+                for item in items:
+                    emb = item.get("embedding")
+                    if not isinstance(emb, list):
+                        raise RuntimeError("远端Embedding返回格式异常：embedding 不是 list")
+                    embeddings.append(emb)
+
+        if len(embeddings) != len(texts):
+            raise RuntimeError(f"远端Embedding返回数量不匹配：期望{len(texts)}，实际{len(embeddings)}")
+
+        return embeddings
+
+    async def _rerank_remote_cohere_compatible(
+        self,
+        *,
+        api_base_url: str,
+        api_key: str,
+        model: str,
+        query: str,
+        documents: List[str],
+        top_n: int,
+        timeout_s: int = 60,
+        min_score: Optional[float] = None,
+    ) -> List[Dict[str, Any]]:
+        """
+        Cohere 兼容 rerank：
+        请求：{model, query, documents, top_n}
+        响应：{results:[{index, relevance_score}, ...]}
+        """
+        if not api_base_url or not model:
+            raise ValueError("远端Rerank配置不完整：api_base_url / model 不能为空")
+
+        url = self._build_openai_compatible_url(api_base_url, "rerank")
+
+        headers: Dict[str, str] = {"Content-Type": "application/json"}
+        if api_key:
+            headers["Authorization"] = f"Bearer {api_key}"
+
+        payload = {
+            "model": model,
+            "query": query,
+            "documents": documents,
+            "top_n": top_n,
+        }
+
+        async with httpx.AsyncClient(timeout=timeout_s) as client:
+            resp = await client.post(url, headers=headers, json=payload)
+            resp.raise_for_status()
+            data = resp.json()
+
+        results = data.get("results") or data.get("data") or []
+        formatted: List[Dict[str, Any]] = []
+        for r in results:
+            try:
+                idx = int(r.get("index"))
+            except Exception:
+                continue
+            score = r.get("relevance_score", r.get("score"))
+            try:
+                score_f = float(score) if score is not None else None
+            except Exception:
+                score_f = None
+
+            if min_score is not None and score_f is not None and score_f < min_score:
+                continue
+
+            formatted.append({"index": idx, "score": score_f})
+
+        # 按分数排序（高->低）；若无分数则保持原样
+        formatted.sort(key=lambda x: (x["score"] is not None, x["score"]), reverse=True)
+        return formatted
     
     async def add_memory(
         self,
@@ -273,7 +581,8 @@ class MemoryService:
         memory_id: str,
         content: str,
         memory_type: str,
-        metadata: Dict[str, Any]
+        metadata: Dict[str, Any],
+        db: Optional[AsyncSession] = None,
     ) -> bool:
         """
         添加记忆到向量数据库
@@ -290,10 +599,12 @@ class MemoryService:
             是否添加成功
         """
         try:
-            collection = self.get_collection(user_id, project_id)
-            
-            # 生成文本的向量表示
-            embedding = self.embedding_model.encode(content).tolist()
+            settings, retrieval = await self._get_user_settings_and_retrieval(user_id, db)
+            embed_backend = self._resolve_embedding_backend(retrieval, settings)
+            collection = self.get_collection(user_id, project_id, embed_id=embed_backend.get("embed_id", "local"))
+
+            # 生成文本的向量表示（本地或远端）
+            embedding = (await self._embed_texts([content], embed_backend))[0]
             
             # 准备元数据(ChromaDB要求所有值为基础类型)
             chroma_metadata = {
@@ -333,7 +644,8 @@ class MemoryService:
         self,
         user_id: str,
         project_id: str,
-        memories: List[Dict[str, Any]]
+        memories: List[Dict[str, Any]],
+        db: Optional[AsyncSession] = None,
     ) -> int:
         """
         批量添加记忆(性能更好)
@@ -350,21 +662,18 @@ class MemoryService:
             return 0
             
         try:
-            collection = self.get_collection(user_id, project_id)
+            settings, retrieval = await self._get_user_settings_and_retrieval(user_id, db)
+            embed_backend = self._resolve_embedding_backend(retrieval, settings)
+            collection = self.get_collection(user_id, project_id, embed_id=embed_backend.get("embed_id", "local"))
             
             ids = []
             documents = []
             metadatas = []
-            embeddings = []
             
             # 批量准备数据
             for mem in memories:
                 ids.append(mem['id'])
                 documents.append(mem['content'])
-                
-                # 生成embedding
-                embedding = self.embedding_model.encode(mem['content']).tolist()
-                embeddings.append(embedding)
                 
                 # 准备元数据
                 metadata = mem.get('metadata', {})
@@ -379,6 +688,9 @@ class MemoryService:
                     "created_at": datetime.now().isoformat()
                 }
                 metadatas.append(chroma_metadata)
+
+            # 批量生成 embedding（本地或远端）
+            embeddings = await self._embed_texts(documents, embed_backend)
             
             # 批量添加
             collection.add(
@@ -403,7 +715,8 @@ class MemoryService:
         memory_types: Optional[List[str]] = None,
         limit: int = 10,
         min_importance: float = 0.0,
-        chapter_range: Optional[tuple] = None
+        chapter_range: Optional[tuple] = None,
+        db: Optional[AsyncSession] = None,
     ) -> List[Dict[str, Any]]:
         """
         语义搜索相关记忆
@@ -421,10 +734,19 @@ class MemoryService:
             相关记忆列表,按相似度排序
         """
         try:
-            collection = self.get_collection(user_id, project_id)
-            
-            # 生成查询向量
-            query_embedding = self.embedding_model.encode(query).tolist()
+            settings, retrieval = await self._get_user_settings_and_retrieval(user_id, db)
+            embed_backend = self._resolve_embedding_backend(retrieval, settings)
+            rerank_backend = self._resolve_rerank_backend(retrieval, settings)
+
+            # rerank 需要更大的候选集合
+            candidate_limit = int(limit or 10)
+            if rerank_backend.get("enabled"):
+                candidate_limit = max(candidate_limit, int(rerank_backend.get("top_k") or candidate_limit))
+
+            collection = self.get_collection(user_id, project_id, embed_id=embed_backend.get("embed_id", "local"))
+
+            # 生成查询向量（本地或远端）
+            query_embedding = (await self._embed_texts([query], embed_backend))[0]
             
             # 构建过滤条件 - ChromaDB要求使用$and组合多个条件
             where_filter = None
@@ -449,7 +771,7 @@ class MemoryService:
             # 执行向量相似度搜索
             results = collection.query(
                 query_embeddings=[query_embedding],
-                n_results=limit,
+                n_results=candidate_limit,
                 where=where_filter
             )
             
@@ -466,7 +788,62 @@ class MemoryService:
                     })
             
             logger.info(f"🔍 语义搜索完成: 查询='{query[:30]}...', 找到{len(memories)}条记忆")
-            return memories
+            # 远端 rerank（可选）
+            if rerank_backend.get("enabled") and memories:
+                try:
+                    # rerank 输入过长会导致成本/延迟陡增，这里做一个轻量截断
+                    docs_for_rerank = [
+                        (m.get("content", "") or "")[:512]
+                        for m in memories
+                    ]
+                    top_n_for_rerank = max(
+                        1,
+                        min(len(docs_for_rerank), max(int(limit or 10), int(rerank_backend.get("top_n") or 10)))
+                    )
+                    rr = await self._rerank_remote_cohere_compatible(
+                        api_base_url=str(rerank_backend.get("api_base_url") or ""),
+                        api_key=str(rerank_backend.get("api_key") or ""),
+                        model=str(rerank_backend.get("model") or ""),
+                        query=query,
+                        documents=docs_for_rerank,
+                        top_n=top_n_for_rerank,
+                        timeout_s=int(rerank_backend.get("timeout_s") or 60),
+                        min_score=rerank_backend.get("min_score"),
+                    )
+                    if rr:
+                        reordered: List[Dict[str, Any]] = []
+                        used = set()
+                        for item in rr:
+                            idx = item.get("index")
+                            if idx is None:
+                                continue
+                            if not isinstance(idx, int):
+                                try:
+                                    idx = int(idx)
+                                except Exception:
+                                    continue
+                            if idx < 0 or idx >= len(memories):
+                                continue
+                            mem = dict(memories[idx])
+                            mem["rerank_score"] = item.get("score")
+                            reordered.append(mem)
+                            used.add(idx)
+
+                        # 将未命中的候选按原向量排序追加（用于 top_n < candidate_limit 场景）
+                        for i, m in enumerate(memories):
+                            if i in used:
+                                continue
+                            reordered.append(m)
+
+                        memories = reordered
+                        logger.info(
+                            f"🔁 rerank 生效: candidates={len(docs_for_rerank)}, return_top_n={top_n_for_rerank}, final_limit={min(len(memories), int(limit or 10))}"
+                        )
+                except Exception as e:
+                    logger.warning(f"⚠️ rerank 失败，回退向量相似度排序: {e}")
+
+            # 按调用方 limit 截断
+            return memories[: int(limit or 10)]
             
         except Exception as e:
             logger.error(f"❌ 搜索记忆失败: {str(e)}")
@@ -478,7 +855,8 @@ class MemoryService:
         project_id: str,
         current_chapter: int,
         recent_count: int = 3,
-        min_importance: float = 0.5
+        min_importance: float = 0.5,
+        db: Optional[AsyncSession] = None,
     ) -> List[Dict[str, Any]]:
         """
         获取最近几章的重要记忆(用于保持连贯性)
@@ -494,7 +872,9 @@ class MemoryService:
             最近章节的记忆列表,按重要性排序
         """
         try:
-            collection = self.get_collection(user_id, project_id)
+            settings, retrieval = await self._get_user_settings_and_retrieval(user_id, db)
+            embed_backend = self._resolve_embedding_backend(retrieval, settings)
+            collection = self.get_collection(user_id, project_id, embed_id=embed_backend.get("embed_id", "local"))
             
             # 计算章节范围
             start_chapter = max(1, current_chapter - recent_count)
@@ -540,7 +920,8 @@ class MemoryService:
         self,
         user_id: str,
         project_id: str,
-        current_chapter: int
+        current_chapter: int,
+        db: Optional[AsyncSession] = None,
     ) -> List[Dict[str, Any]]:
         """
         查找未完结的伏笔
@@ -554,7 +935,9 @@ class MemoryService:
             未完结伏笔列表
         """
         try:
-            collection = self.get_collection(user_id, project_id)
+            settings, retrieval = await self._get_user_settings_and_retrieval(user_id, db)
+            embed_backend = self._resolve_embedding_backend(retrieval, settings)
+            collection = self.get_collection(user_id, project_id, embed_id=embed_backend.get("embed_id", "local"))
             
             # 查找伏笔状态为1(已埋下但未回收)的记忆
             results = collection.get(
@@ -595,7 +978,8 @@ class MemoryService:
         project_id: str,
         current_chapter: int,
         chapter_outline: str,
-        character_names: List[str] = None
+        character_names: List[str] = None,
+        db: Optional[AsyncSession] = None,
     ) -> Dict[str, Any]:
         """
         为章节生成构建智能上下文
@@ -617,7 +1001,7 @@ class MemoryService:
         # 1. 获取最近章节上下文(时间连续性)
         recent = await self.get_recent_memories(
             user_id, project_id, current_chapter, 
-            recent_count=3, min_importance=0.5
+            recent_count=3, min_importance=0.5, db=db
         )
         
         # 2. 语义搜索相关记忆
@@ -626,12 +1010,13 @@ class MemoryService:
             project_id=project_id,
             query=chapter_outline,
             limit=10,
-            min_importance=0.4
+            min_importance=0.4,
+            db=db,
         )
         
         # 3. 查找未完结伏笔
         foreshadows = await self.find_unresolved_foreshadows(
-            user_id, project_id, current_chapter
+            user_id, project_id, current_chapter, db=db
         )
         
         # 4. 如果有指定角色,获取角色相关记忆
@@ -643,7 +1028,8 @@ class MemoryService:
                 project_id=project_id,
                 query=character_query,
                 memory_types=["character_event", "plot_point"],
-                limit=8
+                limit=8,
+                db=db,
             )
         
         # 5. 获取重要情节点
@@ -655,7 +1041,8 @@ class MemoryService:
                 query="重要 转折 高潮 关键",
                 memory_types=["plot_point", "hook"],
                 limit=5,
-                min_importance=0.7
+                min_importance=0.7,
+                db=db,
             )
         except Exception as e:
             logger.error(f"❌ 搜索记忆失败: {str(e)}")
@@ -667,7 +1054,8 @@ class MemoryService:
                     project_id=project_id,
                     query="重要 转折 高潮 关键",
                     memory_types=["plot_point", "hook"],
-                    limit=5
+                    limit=5,
+                    db=db,
                 )
             except Exception as e2:
                 logger.warning(f"⚠️ 降级查询也失败: {str(e2)}")
@@ -741,21 +1129,24 @@ class MemoryService:
             是否删除成功
         """
         try:
-            collection = self.get_collection(user_id, project_id)
-            
-            # 查找该章节的所有记忆
-            results = collection.get(
-                where={"chapter_id": chapter_id}
-            )
-            
-            if results['ids']:
-                # 删除这些记忆
-                collection.delete(ids=results['ids'])
-                logger.info(f"🗑️ 已删除章节{chapter_id[:8]}的{len(results['ids'])}条记忆")
-                return True
+            # 远端/local embedding 可能对应不同 collection，这里统一清理
+            deleted_total = 0
+            for name in self._list_project_collection_names(user_id, project_id):
+                try:
+                    collection = self.client.get_collection(name=name)
+                except Exception:
+                    continue
+
+                results = collection.get(where={"chapter_id": chapter_id})
+                if results and results.get("ids"):
+                    collection.delete(ids=results["ids"])
+                    deleted_total += len(results["ids"])
+
+            if deleted_total > 0:
+                logger.info(f"🗑️ 已删除章节{chapter_id[:8]}的{deleted_total}条向量记忆（跨collection）")
             else:
-                logger.info(f"ℹ️ 章节{chapter_id[:8]}没有记忆需要删除")
-                return True
+                logger.info(f"ℹ️ 章节{chapter_id[:8]}没有向量记忆需要删除")
+            return True
                 
         except Exception as e:
             logger.error(f"❌ 删除章节记忆失败: {str(e)}")
@@ -777,23 +1168,21 @@ class MemoryService:
             是否删除成功
         """
         try:
-            # 生成collection名称
-            user_hash = hashlib.sha256(user_id.encode()).hexdigest()[:8]
-            project_hash = hashlib.sha256(project_id.encode()).hexdigest()[:8]
-            collection_name = f"u_{user_hash}_p_{project_hash}"
-            
-            # 删除整个collection(这会清理所有向量数据)
-            try:
-                self.client.delete_collection(name=collection_name)
-                logger.info(f"🗑️ 已删除项目{project_id[:8]}的向量数据库collection: {collection_name}")
-                return True
-            except Exception as e:
-                # 如果collection不存在,也算成功
-                if "does not exist" in str(e).lower():
-                    logger.info(f"ℹ️ 项目{project_id[:8]}的collection不存在,无需删除")
-                    return True
-                else:
-                    raise
+            # 删除整个 collection（包含 local 与 remote 变体）
+            deleted = 0
+            names = self._list_project_collection_names(user_id, project_id)
+            for name in names:
+                try:
+                    self.client.delete_collection(name=name)
+                    deleted += 1
+                except Exception as e:
+                    # collection 不存在也算成功
+                    if "does not exist" in str(e).lower():
+                        continue
+                    logger.warning(f"⚠️ 删除collection失败: {name}: {e}")
+
+            logger.info(f"🗑️ 已删除项目{project_id[:8]}的向量数据库collection: {deleted}/{len(names)} 个")
+            return True
                 
         except Exception as e:
             logger.error(f"❌ 删除项目记忆失败: {str(e)}")
@@ -805,7 +1194,8 @@ class MemoryService:
         project_id: str,
         memory_id: str,
         content: Optional[str] = None,
-        metadata: Optional[Dict[str, Any]] = None
+        metadata: Optional[Dict[str, Any]] = None,
+        db: Optional[AsyncSession] = None,
     ) -> bool:
         """
         更新记忆内容或元数据
@@ -821,13 +1211,15 @@ class MemoryService:
             是否更新成功
         """
         try:
-            collection = self.get_collection(user_id, project_id)
+            settings, retrieval = await self._get_user_settings_and_retrieval(user_id, db)
+            embed_backend = self._resolve_embedding_backend(retrieval, settings)
+            collection = self.get_collection(user_id, project_id, embed_id=embed_backend.get("embed_id", "local"))
             
             update_data = {}
             
             if content:
-                # 重新生成embedding
-                embedding = self.embedding_model.encode(content).tolist()
+                # 重新生成 embedding（本地或远端）
+                embedding = (await self._embed_texts([content], embed_backend))[0]
                 update_data['embeddings'] = [embedding]
                 update_data['documents'] = [content]
             
@@ -859,7 +1251,8 @@ class MemoryService:
     async def get_memory_stats(
         self,
         user_id: str,
-        project_id: str
+        project_id: str,
+        db: Optional[AsyncSession] = None,
     ) -> Dict[str, Any]:
         """
         获取记忆统计信息
@@ -872,7 +1265,9 @@ class MemoryService:
             统计信息字典
         """
         try:
-            collection = self.get_collection(user_id, project_id)
+            settings, retrieval = await self._get_user_settings_and_retrieval(user_id, db)
+            embed_backend = self._resolve_embedding_backend(retrieval, settings)
+            collection = self.get_collection(user_id, project_id, embed_id=embed_backend.get("embed_id", "local"))
             
             # 获取所有记忆
             all_memories = collection.get()
