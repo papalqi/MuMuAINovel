@@ -3,6 +3,7 @@ import { Button, List, Modal, Form, Input, message, Empty, Space, Popconfirm, Ca
 import { EditOutlined, DeleteOutlined, ThunderboltOutlined, BranchesOutlined, AppstoreAddOutlined, CheckCircleOutlined, ExclamationCircleOutlined, PlusOutlined, FileTextOutlined } from '@ant-design/icons';
 import { useStore } from '../store';
 import { useOutlineSync } from '../store/hooks';
+import { useTaskCenterStore } from '../store/taskCenter';
 import { SSEPostClient } from '../utils/sseClient';
 import { SSEProgressModal } from '../components/SSEProgressModal';
 import { outlineApi, chapterApi, projectApi, characterApi } from '../services/api';
@@ -128,6 +129,10 @@ export default function Outline() {
     updateOutline,
     deleteOutline
   } = useOutlineSync();
+  const createTask = useTaskCenterStore((state) => state.createTask);
+  const setTaskProgress = useTaskCenterStore((state) => state.setTaskProgress);
+  const markTaskSuccess = useTaskCenterStore((state) => state.markTaskSuccess);
+  const markTaskFailed = useTaskCenterStore((state) => state.markTaskFailed);
 
   // 初始加载大纲列表和角色列表
   useEffect(() => {
@@ -467,7 +472,8 @@ export default function Outline() {
     keep_existing?: boolean;
   }
 
-  const handleGenerate = async (values: GenerateFormValues) => {
+  const handleGenerate = async (values: GenerateFormValues, existingTaskId?: string) => {
+    let taskId = existingTaskId;
     try {
       setIsGenerating(true);
 
@@ -513,6 +519,18 @@ export default function Outline() {
         console.log('5. 添加provider到请求:', values.provider);
       }
 
+      if (!taskId) {
+        taskId = createTask({
+          type: 'outline_generate',
+          name: `大纲生成/续写（${values.mode || 'auto'}）`,
+          message: '任务初始化中...',
+          maxRetries: 5,
+          retryAction: () => handleGenerate({ ...values }, taskId),
+        });
+      }
+
+      setTaskProgress(taskId, 0, '正在连接AI服务...');
+
       console.log('6. 最终请求数据:', JSON.stringify(requestData, null, 2));
       console.log('=========================');
 
@@ -522,6 +540,9 @@ export default function Outline() {
         onProgress: (msg: string, progress: number) => {
           setSSEMessage(msg);
           setSSEProgress(progress);
+          if (taskId) {
+            setTaskProgress(taskId, progress, msg);
+          }
         },
         onResult: (data: unknown) => {
           console.log('生成完成，结果:', data);
@@ -531,6 +552,9 @@ export default function Outline() {
           message.error(`生成失败: ${error}`);
           setSSEModalVisible(false);
           setIsGenerating(false);
+          if (taskId) {
+            markTaskFailed(taskId, error);
+          }
         },
         onComplete: () => {
           message.success('大纲生成完成！');
@@ -538,6 +562,9 @@ export default function Outline() {
           setIsGenerating(false);
           // 刷新大纲列表
           refreshOutlines();
+          if (taskId) {
+            markTaskSuccess(taskId, '大纲生成完成');
+          }
         }
       });
 
@@ -549,6 +576,12 @@ export default function Outline() {
       message.error('AI生成失败');
       setSSEModalVisible(false);
       setIsGenerating(false);
+      if (taskId) {
+        markTaskFailed(
+          taskId,
+          error instanceof Error ? error.message : 'AI生成失败'
+        );
+      }
     }
   };
 
@@ -1000,12 +1033,55 @@ export default function Outline() {
               enable_scene_analysis: true
             };
 
+            const taskId = createTask({
+              type: 'outline_expand',
+              name: `展开大纲《${outlineTitle}》`,
+              message: '任务初始化中...',
+              maxRetries: 5,
+              retryAction: () => {
+                setIsExpanding(true);
+                setSSEProgress(0);
+                setSSEMessage('正在重试展开大纲...');
+                setSSEModalVisible(true);
+
+                const retryClient = new SSEPostClient(
+                  `/api/outlines/${outlineId}/expand-stream`,
+                  requestData,
+                  {
+                    onProgress: (msg: string, progress: number) => {
+                      setSSEMessage(msg);
+                      setSSEProgress(progress);
+                      setTaskProgress(taskId, progress, msg);
+                    },
+                    onResult: (data: OutlineExpansionResponse) => {
+                      setSSEModalVisible(false);
+                      showExpansionPreview(outlineId, data);
+                    },
+                    onError: (error: string) => {
+                      message.error(`展开失败: ${error}`);
+                      setSSEModalVisible(false);
+                      setIsExpanding(false);
+                      markTaskFailed(taskId, error);
+                    },
+                    onComplete: () => {
+                      setSSEModalVisible(false);
+                      setIsExpanding(false);
+                      markTaskSuccess(taskId, `大纲《${outlineTitle}》展开完成`);
+                    },
+                  }
+                );
+                retryClient.connect();
+              },
+            });
+            setTaskProgress(taskId, 0, '正在准备展开大纲...');
+
             // 使用SSE客户端调用新的流式端点
             const apiUrl = `/api/outlines/${outlineId}/expand-stream`;
             const client = new SSEPostClient(apiUrl, requestData, {
               onProgress: (msg: string, progress: number) => {
                 setSSEMessage(msg);
                 setSSEProgress(progress);
+                setTaskProgress(taskId, progress, msg);
               },
               onResult: (data: OutlineExpansionResponse) => {
                 console.log('展开完成，结果:', data);
@@ -1018,10 +1094,12 @@ export default function Outline() {
                 message.error(`展开失败: ${error}`);
                 setSSEModalVisible(false);
                 setIsExpanding(false);
+                markTaskFailed(taskId, error);
               },
               onComplete: () => {
                 setSSEModalVisible(false);
                 setIsExpanding(false);
+                markTaskSuccess(taskId, `大纲《${outlineTitle}》展开完成`);
               }
             });
 
@@ -1546,12 +1624,56 @@ export default function Outline() {
             auto_create_chapters: false // 第一步：仅生成规划
           };
 
+          const taskId = createTask({
+            type: 'outline_batch_expand',
+            name: `批量展开大纲（${outlines.length}个）`,
+            message: '任务初始化中...',
+            maxRetries: 5,
+            retryAction: () => {
+              setIsExpanding(true);
+              setSSEProgress(0);
+              setSSEMessage('正在重试批量展开...');
+              setSSEModalVisible(true);
+
+              const retryClient = new SSEPostClient('/api/outlines/batch-expand-stream', requestData, {
+                onProgress: (msg: string, progress: number) => {
+                  setSSEMessage(msg);
+                  setSSEProgress(progress);
+                  setTaskProgress(taskId, progress, msg);
+                },
+                onResult: (data: BatchOutlineExpansionResponse) => {
+                  setCachedBatchExpansionResponse(data);
+                  setBatchPreviewData(data);
+                  setSSEModalVisible(false);
+                  setSelectedOutlineIdx(0);
+                  setSelectedChapterIdx(0);
+                  setBatchPreviewVisible(true);
+                },
+                onError: (error: string) => {
+                  message.error(`批量展开失败: ${error}`);
+                  setSSEModalVisible(false);
+                  setIsExpanding(false);
+                  markTaskFailed(taskId, error);
+                },
+                onComplete: () => {
+                  setSSEModalVisible(false);
+                  setIsExpanding(false);
+                  markTaskSuccess(taskId, '批量大纲展开完成');
+                }
+              });
+
+              retryClient.connect();
+            }
+          });
+          setTaskProgress(taskId, 0, '正在准备批量展开...');
+
           // 使用SSE客户端
           const apiUrl = `/api/outlines/batch-expand-stream`;
           const client = new SSEPostClient(apiUrl, requestData, {
             onProgress: (msg: string, progress: number) => {
               setSSEMessage(msg);
               setSSEProgress(progress);
+              setTaskProgress(taskId, progress, msg);
             },
             onResult: (data: BatchOutlineExpansionResponse) => {
               console.log('批量展开完成，结果:', data);
@@ -1570,10 +1692,12 @@ export default function Outline() {
               message.error(`批量展开失败: ${error}`);
               setSSEModalVisible(false);
               setIsExpanding(false);
+              markTaskFailed(taskId, error);
             },
             onComplete: () => {
               setSSEModalVisible(false);
               setIsExpanding(false);
+              markTaskSuccess(taskId, '批量大纲展开完成');
             }
           });
 

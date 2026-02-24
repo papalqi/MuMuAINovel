@@ -13,6 +13,7 @@ import {
 import api from '../services/api';
 import AnnotatedText, { type MemoryAnnotation } from '../components/AnnotatedText';
 import MemorySidebar from '../components/MemorySidebar';
+import { useTaskCenterStore } from '../store/taskCenter';
 
 interface ChapterData {
   id: string;
@@ -74,6 +75,10 @@ const ChapterReader: React.FC = () => {
   const [analyzing, setAnalyzing] = useState(false);
   const [analysisProgress, setAnalysisProgress] = useState(0);
   const [navigation, setNavigation] = useState<NavigationData | null>(null);
+  const createTask = useTaskCenterStore((state) => state.createTask);
+  const setTaskProgress = useTaskCenterStore((state) => state.setTaskProgress);
+  const markTaskSuccess = useTaskCenterStore((state) => state.markTaskSuccess);
+  const markTaskFailed = useTaskCenterStore((state) => state.markTaskFailed);
 
   const loadChapterData = useCallback(async () => {
     try {
@@ -163,10 +168,26 @@ const ChapterReader: React.FC = () => {
     }
   };
 
-  const handleReanalyze = async () => {
+  const handleReanalyze = async (existingTaskId?: string) => {
     if (!chapterId) return;
 
+    const chapterLabel = chapter
+      ? `第${chapter.chapter_number}章《${chapter.title}》`
+      : `章节(${chapterId.slice(0, 8)})`;
+
+    let uiTaskId = existingTaskId;
+    if (!uiTaskId) {
+      uiTaskId = createTask({
+        type: 'chapter_analysis',
+        name: `分析${chapterLabel}`,
+        message: '任务初始化中...',
+        maxRetries: 5,
+        retryAction: () => handleReanalyze(uiTaskId),
+      });
+    }
+
     try {
+      setTaskProgress(uiTaskId, 0, '开始分析章节...');
       setAnalyzing(true);
       setAnalysisProgress(0);
       message.loading({ content: '开始分析章节...', key: 'analyze', duration: 0 });
@@ -175,28 +196,44 @@ const ChapterReader: React.FC = () => {
       await api.post(`/chapters/${chapterId}/analyze`);
 
       // 轮询分析状态
+      let finished = false;
       const pollInterval = setInterval(async () => {
         try {
           const statusRes = await api.get(`/chapters/${chapterId}/analysis/status`);
-          const { status, progress, error_message } = statusRes.data;
+          const statusData = (statusRes as { data?: { status?: string; progress?: number; error_message?: string } }).data || statusRes;
+          const { status, progress, error_message } = statusData as {
+            status?: string;
+            progress?: number;
+            error_message?: string;
+          };
 
           setAnalysisProgress(progress || 0);
+          setTaskProgress(uiTaskId, progress || 0, `分析中... ${progress || 0}%`);
 
           if (status === 'completed') {
+            finished = true;
             clearInterval(pollInterval);
+            clearTimeout(timeoutId);
             setAnalyzing(false);
             message.success({ content: '分析完成！', key: 'analyze' });
+            markTaskSuccess(uiTaskId, `${chapterLabel}分析完成`);
             
             // 重新加载标注数据
             const annotationsRes = await api.get(`/chapters/${chapterId}/annotations`);
-            setAnnotationsData(annotationsRes.data);
+            const annotationsData =
+              (annotationsRes as { data?: AnnotationsData }).data ||
+              (annotationsRes as unknown as AnnotationsData);
+            setAnnotationsData(annotationsData);
           } else if (status === 'failed') {
+            finished = true;
             clearInterval(pollInterval);
+            clearTimeout(timeoutId);
             setAnalyzing(false);
             message.error({
               content: `分析失败：${error_message || '未知错误'}`,
               key: 'analyze'
             });
+            markTaskFailed(uiTaskId, error_message || '未知错误');
           }
         } catch (err) {
           console.error('轮询分析状态失败:', err);
@@ -204,21 +241,25 @@ const ChapterReader: React.FC = () => {
       }, 2000); // 每2秒轮询一次
 
       // 30秒超时
-      setTimeout(() => {
-        clearInterval(pollInterval);
-        if (analyzing) {
+      const timeoutId = setTimeout(() => {
+        if (!finished) {
+          finished = true;
+          clearInterval(pollInterval);
           setAnalyzing(false);
           message.warning({ content: '分析超时，请稍后刷新查看结果', key: 'analyze' });
+          markTaskFailed(uiTaskId, '分析超时，请稍后重试');
         }
       }, 30000);
 
     } catch (err: unknown) {
       setAnalyzing(false);
       const error = err as { response?: { data?: { detail?: string } } };
+      const errorMessage = error.response?.data?.detail || '触发分析失败';
       message.error({
-        content: error.response?.data?.detail || '触发分析失败',
+        content: errorMessage,
         key: 'analyze'
       });
+      markTaskFailed(uiTaskId, errorMessage);
     }
   };
 
@@ -289,7 +330,7 @@ const ChapterReader: React.FC = () => {
           <Space>
             <Button
               icon={<ReloadOutlined />}
-              onClick={handleReanalyze}
+              onClick={() => handleReanalyze()}
               loading={analyzing}
               disabled={analyzing}
             >

@@ -1,4 +1,4 @@
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { ConfigProvider } from 'antd';
 import zhCN from 'antd/locale/zh_CN';
 import ProjectList from './pages/ProjectList';
@@ -28,7 +28,19 @@ import AuthCallback from './pages/AuthCallback';
 import ProtectedRoute from './components/ProtectedRoute';
 import AppFooter from './components/AppFooter';
 import SpringFestival from './components/SpringFestival';
+import TaskCenterFloating from './components/TaskCenterFloating';
 import './App.css';
+
+function GlobalTaskCenter() {
+  const location = useLocation();
+  const hiddenPaths = ['/login', '/auth/callback'];
+
+  if (hiddenPaths.includes(location.pathname)) {
+    return null;
+  }
+
+  return <TaskCenterFloating />;
+}
 
 function App() {
   return (
@@ -71,6 +83,7 @@ function App() {
             {/* <Route path="polish" element={<Polish />} /> */}
           </Route>
         </Routes>
+        <GlobalTaskCenter />
       </BrowserRouter>
     </ConfigProvider>
   );

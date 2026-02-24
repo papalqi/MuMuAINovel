@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { List, Button, Modal, Form, Input, Select, message, Empty, Space, Badge, Tag, Card, InputNumber, Alert, Radio, Descriptions, Collapse, Popconfirm, FloatButton } from 'antd';
 import { EditOutlined, FileTextOutlined, ThunderboltOutlined, LockOutlined, DownloadOutlined, SettingOutlined, FundOutlined, SyncOutlined, CheckCircleOutlined, CloseCircleOutlined, RocketOutlined, StopOutlined, InfoCircleOutlined, CaretRightOutlined, DeleteOutlined, BookOutlined, FormOutlined, PlusOutlined, ReadOutlined } from '@ant-design/icons';
 import { useStore } from '../store';
+import { useTaskCenterStore } from '../store/taskCenter';
 import { useChapterSync } from '../store/hooks';
 import { projectApi, writingStyleApi, chapterApi } from '../services/api';
 import type { Chapter, ChapterUpdate, ApiError, WritingStyle, AnalysisTask, ExpansionPlanData } from '../types';
@@ -106,6 +107,12 @@ export default function Chapters() {
     estimated_time_minutes?: number;
   } | null>(null);
   const batchPollingIntervalRef = useRef<number | null>(null);
+  const [batchUiTaskId, setBatchUiTaskId] = useState<string | null>(null);
+  const createTask = useTaskCenterStore((state) => state.createTask);
+  const setTaskProgress = useTaskCenterStore((state) => state.setTaskProgress);
+  const markTaskSuccess = useTaskCenterStore((state) => state.markTaskSuccess);
+  const markTaskFailed = useTaskCenterStore((state) => state.markTaskFailed);
+  const markTaskCancelled = useTaskCenterStore((state) => state.markTaskCancelled);
 
   useEffect(() => {
     const handleResize = () => {
@@ -494,6 +501,13 @@ export default function Chapters() {
 
       if (data.has_active_task && data.task) {
         const task = data.task;
+        const restoredUiTaskId = createTask({
+          type: 'chapter_batch_generate',
+          name: `恢复批量生成任务（第${task.current_chapter_number || '?'}章）`,
+          message: '检测到进行中的任务，正在恢复状态...',
+          maxRetries: 0,
+        });
+        setBatchUiTaskId(restoredUiTaskId);
 
         // 恢复任务状态
         setBatchTaskId(task.batch_id);
@@ -507,7 +521,7 @@ export default function Chapters() {
         setBatchGenerateVisible(true);
 
         // 启动轮询
-        startBatchPolling(task.batch_id);
+        startBatchPolling(task.batch_id, restoredUiTaskId);
 
         message.info('检测到未完成的批量生成任务，已自动恢复');
       }
@@ -747,17 +761,39 @@ export default function Chapters() {
     }
   };
 
-  const handleGenerate = async () => {
-    if (!editingId) return;
+  const handleGenerate = async (options?: { chapterId?: string; existingTaskId?: string }) => {
+    const targetChapterId = options?.chapterId || editingId;
+    if (!targetChapterId) return;
+
+    const targetChapter = chapters.find((c) => c.id === targetChapterId);
+    const chapterName = targetChapter
+      ? `第${targetChapter.chapter_number}章《${targetChapter.title}》`
+      : `章节(${targetChapterId.slice(0, 8)})`;
+
+    let uiTaskId = options?.existingTaskId;
+    if (!uiTaskId) {
+      uiTaskId = createTask({
+        type: 'chapter_generate',
+        name: `生成${chapterName}`,
+        message: '任务初始化中...',
+        maxRetries: 5,
+        retryAction: () =>
+          handleGenerate({
+            chapterId: targetChapterId,
+            existingTaskId: uiTaskId,
+          }),
+      });
+    }
 
     try {
       setIsContinuing(true);
       setIsGenerating(true);
       setSingleChapterProgress(0);
       setSingleChapterProgressMessage('准备开始生成...');
+      setTaskProgress(uiTaskId, 0, '准备开始生成...');
 
       const result = await generateChapterContentStream(
-        editingId,
+        targetChapterId,
         (content) => {
           editorForm.setFieldsValue({ content });
 
@@ -774,33 +810,38 @@ export default function Chapters() {
           // 进度回调
           setSingleChapterProgress(progressValue);
           setSingleChapterProgressMessage(progressMsg);
+          setTaskProgress(uiTaskId, progressValue, progressMsg);
         },
         selectedModel,  // 传递选中的模型
         temporaryNarrativePerspective  // 传递临时人称参数
       );
 
       message.success('AI创作成功，正在分析章节内容...');
+      markTaskSuccess(uiTaskId, `${chapterName}生成完成`);
 
       // 如果返回了分析任务ID，启动轮询
       if (result?.analysis_task_id) {
         const taskId = result.analysis_task_id;
         setAnalysisTasksMap(prev => ({
           ...prev,
-          [editingId]: {
+          [targetChapterId]: {
             has_task: true,
             task_id: taskId,
-            chapter_id: editingId,
+            chapter_id: targetChapterId,
             status: 'pending',
             progress: 0
           }
         }));
 
         // 启动轮询
-        startPollingTask(editingId);
+        startPollingTask(targetChapterId);
       }
     } catch (error) {
       const apiError = error as ApiError;
-      message.error('AI创作失败：' + (apiError.response?.data?.detail || apiError.message || '未知错误'));
+      const errorMessage =
+        apiError.response?.data?.detail || apiError.message || '未知错误';
+      message.error('AI创作失败：' + errorMessage);
+      markTaskFailed(uiTaskId, errorMessage);
     } finally {
       setIsContinuing(false);
       setIsGenerating(false);
@@ -887,7 +928,7 @@ export default function Chapters() {
             });
             return;
           }
-          await handleGenerate();
+          await handleGenerate({ chapterId: chapter.id });
           instance.destroy();
         } catch {
           instance.update({
@@ -962,7 +1003,7 @@ export default function Chapters() {
     styleId?: number;
     targetWordCount?: number;
     model?: string;
-  }) => {
+  }, existingTaskId?: string) => {
     if (!currentProject?.id) return;
 
     // 调试日志
@@ -982,6 +1023,28 @@ export default function Chapters() {
       message.error('请选择写作风格');
       return;
     }
+
+    let uiTaskId = existingTaskId;
+    if (!uiTaskId) {
+      uiTaskId = createTask({
+        type: 'chapter_batch_generate',
+        name: `批量生成第${values.startChapterNumber}章起共${values.count}章`,
+        message: '任务初始化中...',
+        maxRetries: 5,
+        retryAction: () =>
+          handleBatchGenerate(
+            {
+              ...values,
+              styleId,
+              targetWordCount: wordCount,
+              model,
+            },
+            uiTaskId
+          ),
+      });
+    }
+    setTaskProgress(uiTaskId, 0, '正在创建批量生成任务...');
+    setBatchUiTaskId(uiTaskId);
 
     try {
       setBatchGenerating(true);
@@ -1036,6 +1099,11 @@ export default function Chapters() {
       });
 
       message.success(`批量生成任务已创建，预计需要 ${result.estimated_time_minutes} 分钟`);
+      setTaskProgress(
+        uiTaskId,
+        5,
+        `批量任务已创建，预计 ${result.estimated_time_minutes} 分钟`
+      );
 
       // 🔔 触发浏览器通知（任务开始）
       showBrowserNotification(
@@ -1045,18 +1113,20 @@ export default function Chapters() {
       );
 
       // 开始轮询任务状态
-      startBatchPolling(result.batch_id);
+      startBatchPolling(result.batch_id, uiTaskId);
 
     } catch (error: unknown) {
       const err = error as Error;
-      message.error('创建批量生成任务失败：' + (err.message || '未知错误'));
+      const errorMessage = err.message || '未知错误';
+      message.error('创建批量生成任务失败：' + errorMessage);
       setBatchGenerating(false);
       setBatchGenerateVisible(false);
+      markTaskFailed(uiTaskId, errorMessage);
     }
   };
 
   // 轮询批量生成任务状态
-  const startBatchPolling = (taskId: string) => {
+  const startBatchPolling = (taskId: string, uiTaskId?: string) => {
     if (batchPollingIntervalRef.current) {
       clearInterval(batchPollingIntervalRef.current);
     }
@@ -1073,6 +1143,16 @@ export default function Chapters() {
           completed: status.completed,
           current_chapter_number: status.current_chapter_number,
         });
+
+        if (uiTaskId) {
+          const total = Number(status.total) || 0;
+          const completed = Number(status.completed) || 0;
+          const progress = total > 0 ? Math.round((completed / total) * 100) : 0;
+          const progressMessage = status.current_chapter_number
+            ? `正在处理第${status.current_chapter_number}章（${completed}/${total}）`
+            : `批量生成进行中（${completed}/${total}）`;
+          setTaskProgress(uiTaskId, progress, progressMessage);
+        }
 
         // 每次轮询时刷新章节列表和分析状态，实时显示新生成的章节和分析进度
         // 使用 await 确保获取最新章节列表后再加载分析任务状态
@@ -1109,6 +1189,9 @@ export default function Chapters() {
 
           if (status.status === 'completed') {
             message.success(`批量生成完成！成功生成 ${status.completed} 章`);
+            if (uiTaskId) {
+              markTaskSuccess(uiTaskId, `批量生成完成，成功 ${status.completed} 章`);
+            }
             // 🔔 触发浏览器通知
             showBrowserNotification(
               '批量生成完成',
@@ -1117,6 +1200,9 @@ export default function Chapters() {
             );
           } else if (status.status === 'failed') {
             message.error(`批量生成失败：${status.error_message || '未知错误'}`);
+            if (uiTaskId) {
+              markTaskFailed(uiTaskId, status.error_message || '未知错误');
+            }
             // 🔔 触发浏览器通知
             showBrowserNotification(
               '批量生成失败',
@@ -1125,6 +1211,9 @@ export default function Chapters() {
             );
           } else if (status.status === 'cancelled') {
             message.warning('批量生成已取消');
+            if (uiTaskId) {
+              markTaskCancelled(uiTaskId, '批量生成已取消');
+            }
           }
 
           // 延迟关闭对话框，让用户看到最终状态
@@ -1160,6 +1249,9 @@ export default function Chapters() {
       }
 
       message.success('批量生成已取消');
+      if (batchUiTaskId) {
+        markTaskCancelled(batchUiTaskId, '用户手动取消批量生成');
+      }
 
       // 取消后立即刷新章节列表和分析任务，显示已生成的章节
       await refreshChapters();
