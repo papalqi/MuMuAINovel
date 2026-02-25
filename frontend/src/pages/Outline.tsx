@@ -45,6 +45,23 @@ interface CharacterEntry {
   type: 'character' | 'organization';
 }
 
+interface PostcheckItemStatus {
+  status: 'success' | 'warning';
+  success: boolean;
+  created_count: number;
+  created_names: string[];
+  error?: string | null;
+}
+
+interface OutlinePostcheckSummary {
+  scope: 'all' | 'characters' | 'organizations';
+  overall_status: 'success' | 'partial_failed' | 'failed';
+  has_warning: boolean;
+  total_created: number;
+  characters?: PostcheckItemStatus | null;
+  organizations?: PostcheckItemStatus | null;
+}
+
 /**
  * 解析 characters 字段，兼容新旧格式
  * 旧格式: string[] -> 全部当作 character
@@ -113,6 +130,8 @@ export default function Outline() {
   const [sseProgress, setSSEProgress] = useState(0);
   const [sseMessage, setSSEMessage] = useState('');
   const [sseModalVisible, setSSEModalVisible] = useState(false);
+  const [isPostchecking, setIsPostchecking] = useState(false);
+  const [lastPostcheckSummary, setLastPostcheckSummary] = useState<OutlinePostcheckSummary | null>(null);
 
   useEffect(() => {
     const handleResize = () => {
@@ -140,6 +159,7 @@ export default function Outline() {
       refreshOutlines();
       // 加载项目角色列表
       loadProjectCharacters();
+      setLastPostcheckSummary(null);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentProject?.id]); // 只依赖 ID，不依赖函数
@@ -580,6 +600,120 @@ export default function Outline() {
         markTaskFailed(
           taskId,
           error instanceof Error ? error.message : 'AI生成失败'
+        );
+      }
+    }
+  };
+
+  const handleRunOutlinePostcheck = async (
+    scope: 'all' | 'characters' | 'organizations' = 'all',
+    existingTaskId?: string
+  ) => {
+    let taskId = existingTaskId;
+    try {
+      if (!currentProject?.id) {
+        message.warning('请先选择项目');
+        return;
+      }
+      if (outlines.length === 0) {
+        message.warning('当前没有大纲可供补全');
+        return;
+      }
+
+      setIsPostchecking(true);
+      setSSEProgress(0);
+      setSSEMessage('正在准备后处理补全...');
+      setSSEModalVisible(true);
+
+      const scopeLabelMap = {
+        all: '人物+组织/地点',
+        characters: '人物',
+        organizations: '组织/地点'
+      } as const;
+
+      if (!taskId) {
+        taskId = createTask({
+          type: 'outline_postcheck',
+          name: `大纲后处理补全（${scopeLabelMap[scope]}）`,
+          message: '任务初始化中...',
+          maxRetries: 5,
+          retryAction: () => handleRunOutlinePostcheck(scope, taskId),
+        });
+      }
+
+      setTaskProgress(taskId, 0, '正在准备后处理补全...');
+
+      let resultPayload: {
+        postcheck?: OutlinePostcheckSummary;
+      } | null = null;
+
+      const client = new SSEPostClient('/api/outlines/postcheck-stream', {
+        project_id: currentProject.id,
+        scope,
+      }, {
+        onProgress: (msg: string, progress: number) => {
+          setSSEMessage(msg);
+          setSSEProgress(progress);
+          if (taskId) {
+            setTaskProgress(taskId, progress, msg);
+          }
+        },
+        onResult: (data: unknown) => {
+          const payload = (data || {}) as { postcheck?: OutlinePostcheckSummary };
+          resultPayload = payload;
+          if (payload.postcheck) {
+            setLastPostcheckSummary(payload.postcheck);
+          }
+        },
+        onError: (error: string) => {
+          message.error(`后处理补全失败: ${error}`);
+          setSSEModalVisible(false);
+          setIsPostchecking(false);
+          if (taskId) {
+            markTaskFailed(taskId, error);
+          }
+        },
+        onComplete: () => {
+          setSSEModalVisible(false);
+          setIsPostchecking(false);
+          refreshOutlines();
+          loadProjectCharacters();
+
+          const overall = resultPayload?.postcheck?.overall_status;
+          if (overall === 'success') {
+            message.success('后处理补全完成');
+            if (taskId) {
+              markTaskSuccess(taskId, '后处理补全完成');
+            }
+          } else if (overall === 'partial_failed') {
+            message.warning('后处理补全完成（部分失败）');
+            if (taskId) {
+              markTaskSuccess(taskId, '后处理补全完成（部分失败）');
+            }
+          } else if (overall === 'failed') {
+            message.warning('后处理补全完成（失败，请查看状态详情）');
+            if (taskId) {
+              markTaskSuccess(taskId, '后处理补全结束（失败）');
+            }
+          } else {
+            message.success('后处理补全完成');
+            if (taskId) {
+              markTaskSuccess(taskId, '后处理补全完成');
+            }
+          }
+        }
+      });
+
+      client.connect();
+    } catch (error) {
+      console.error('后处理补全失败:', error);
+      message.error('后处理补全失败');
+      setSSEModalVisible(false);
+      setIsPostchecking(false);
+      if (taskId) {
+        markTaskFailed(
+          taskId,
+          error instanceof Error ? error.message : '后处理补全失败'
         );
       }
     }
@@ -2041,6 +2175,16 @@ export default function Outline() {
             >
               {isMobile ? 'AI生成/续写' : 'AI生成/续写大纲'}
             </Button>
+            <Button
+              icon={<CheckCircleOutlined />}
+              onClick={() => handleRunOutlinePostcheck('all')}
+              loading={isPostchecking}
+              disabled={isGenerating || outlines.length === 0}
+              block={isMobile}
+              title="手动触发大纲后处理：补全新人物与新组织/地点信息"
+            >
+              {isMobile ? '补全人物/地点' : '补全新人物/地点'}
+            </Button>
             {outlines.length > 0 && currentProject?.outline_mode === 'one-to-many' && (
               <Button
                 icon={<AppstoreAddOutlined />}
@@ -2057,6 +2201,55 @@ export default function Outline() {
 
         {/* 可滚动内容区域 */}
         <div style={{ flex: 1, overflowY: 'auto' }}>
+          {lastPostcheckSummary && (
+            <Card
+              size="small"
+              style={{
+                marginBottom: 12,
+                borderColor:
+                  lastPostcheckSummary.overall_status === 'success'
+                    ? 'var(--color-success-border)'
+                    : 'var(--color-warning-border)',
+                background:
+                  lastPostcheckSummary.overall_status === 'success'
+                    ? 'var(--color-success-bg)'
+                    : 'var(--color-warning-bg)'
+              }}
+            >
+              <Space size="small" wrap>
+                <Tag color={
+                  lastPostcheckSummary.overall_status === 'success'
+                    ? 'success'
+                    : lastPostcheckSummary.overall_status === 'partial_failed'
+                      ? 'warning'
+                      : 'error'
+                }>
+                  后处理状态：{lastPostcheckSummary.overall_status}
+                </Tag>
+                <Tag color="blue">新增总数：{lastPostcheckSummary.total_created}</Tag>
+                {lastPostcheckSummary.characters && (
+                  <Tag color={lastPostcheckSummary.characters.success ? 'green' : 'orange'}>
+                    角色：{lastPostcheckSummary.characters.created_count}
+                  </Tag>
+                )}
+                {lastPostcheckSummary.organizations && (
+                  <Tag color={lastPostcheckSummary.organizations.success ? 'green' : 'orange'}>
+                    组织/地点：{lastPostcheckSummary.organizations.created_count}
+                  </Tag>
+                )}
+              </Space>
+              {(lastPostcheckSummary.characters?.error || lastPostcheckSummary.organizations?.error) && (
+                <div style={{ marginTop: 8, color: 'var(--color-warning)' }}>
+                  {lastPostcheckSummary.characters?.error && (
+                    <div>角色补全错误：{lastPostcheckSummary.characters.error}</div>
+                  )}
+                  {lastPostcheckSummary.organizations?.error && (
+                    <div>组织/地点补全错误：{lastPostcheckSummary.organizations.error}</div>
+                  )}
+                </div>
+              )}
+            </Card>
+          )}
           {outlines.length === 0 ? (
             <Empty description="还没有大纲，开始创建吧！" />
           ) : (
