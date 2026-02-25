@@ -4,6 +4,7 @@ import {
   Button,
   Drawer,
   Empty,
+  Grid,
   List,
   Progress,
   Space,
@@ -61,6 +62,8 @@ const getTypeLabel = (type: string) => typeNameMap[type] || type;
 
 export default function TaskCenterFloating() {
   const [visible, setVisible] = useState(false);
+  const screens = Grid.useBreakpoint();
+  const isMobile = !screens.md;
   const tasks = useTaskCenterStore((state) => state.tasks);
   const retryTask = useTaskCenterStore((state) => state.retryTask);
   const removeTask = useTaskCenterStore((state) => state.removeTask);
@@ -87,8 +90,8 @@ export default function TaskCenterFloating() {
       <div
         style={{
           position: 'fixed',
-          right: 24,
-          bottom: 24,
+          right: isMobile ? 16 : 24,
+          bottom: `calc(env(safe-area-inset-bottom, 0px) + ${isMobile ? 16 : 24}px)`,
           zIndex: 1200,
         }}
       >
@@ -107,7 +110,7 @@ export default function TaskCenterFloating() {
 
       <Drawer
         title={
-          <Space>
+          <Space wrap size={[8, 8]}>
             <span>任务中心</span>
             <Tag color="processing">进行中 {runningCount}</Tag>
             <Tag color={failedCount > 0 ? 'error' : 'default'}>
@@ -117,7 +120,14 @@ export default function TaskCenterFloating() {
         }
         open={visible}
         onClose={() => setVisible(false)}
-        width={460}
+        placement={isMobile ? 'bottom' : 'right'}
+        width={isMobile ? undefined : 460}
+        height={isMobile ? '72vh' : undefined}
+        styles={{
+          body: {
+            paddingBottom: 'calc(env(safe-area-inset-bottom, 0px) + 16px)',
+          },
+        }}
         extra={
           <Space>
             <Tooltip title="清理已结束任务">
@@ -145,28 +155,30 @@ export default function TaskCenterFloating() {
                 !!task.retryAction &&
                 task.retryCount < task.maxRetries;
 
+              const desktopActions = [
+                canRetry ? (
+                  <Button
+                    key="retry"
+                    type="link"
+                    icon={<ReloadOutlined />}
+                    loading={task.retrying}
+                    onClick={() => retryTask(task.id)}
+                  >
+                    重试
+                  </Button>
+                ) : null,
+                <Button
+                  key="delete"
+                  type="text"
+                  danger
+                  icon={<DeleteOutlined />}
+                  onClick={() => removeTask(task.id)}
+                />,
+              ].filter(Boolean);
+
               return (
                 <List.Item
-                  actions={[
-                    canRetry ? (
-                      <Button
-                        key="retry"
-                        type="link"
-                        icon={<ReloadOutlined />}
-                        loading={task.retrying}
-                        onClick={() => retryTask(task.id)}
-                      >
-                        重试
-                      </Button>
-                    ) : null,
-                    <Button
-                      key="delete"
-                      type="text"
-                      danger
-                      icon={<DeleteOutlined />}
-                      onClick={() => removeTask(task.id)}
-                    />,
-                  ].filter(Boolean)}
+                  actions={isMobile ? undefined : desktopActions}
                 >
                   <Space direction="vertical" style={{ width: '100%' }} size={4}>
                     <Space wrap>
@@ -201,6 +213,30 @@ export default function TaskCenterFloating() {
                     <Text type="secondary" style={{ fontSize: 11 }}>
                       重试次数：{task.retryCount}/{task.maxRetries}
                     </Text>
+
+                    {isMobile && (
+                      <Space size={8} style={{ marginTop: 4 }}>
+                        {canRetry && (
+                          <Button
+                            type="default"
+                            size="small"
+                            icon={<ReloadOutlined />}
+                            loading={task.retrying}
+                            onClick={() => retryTask(task.id)}
+                          >
+                            重试
+                          </Button>
+                        )}
+                        <Button
+                          danger
+                          size="small"
+                          icon={<DeleteOutlined />}
+                          onClick={() => removeTask(task.id)}
+                        >
+                          删除
+                        </Button>
+                      </Space>
+                    )}
                   </Space>
                 </List.Item>
               );
@@ -211,4 +247,3 @@ export default function TaskCenterFloating() {
     </>
   );
 }
-
