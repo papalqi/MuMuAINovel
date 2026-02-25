@@ -12,7 +12,7 @@ from app.database import close_db, _session_stats
 from app.logger import setup_logging, get_logger
 from app.middleware import RequestIDMiddleware
 from app.middleware.auth_middleware import AuthMiddleware
-from app.mcp import mcp_client, register_status_sync
+from app.mcp import mcp_client, register_status_sync, mumu_mcp_server, MCP_SERVER_AVAILABLE
 
 setup_logging(
     level=config_settings.log_level,
@@ -29,6 +29,20 @@ async def lifespan(app: FastAPI):
     """应用生命周期管理"""
     # 注册MCP状态同步服务
     register_status_sync()
+
+    # 启动 MuMu 对外 MCP Server（streamable-http 会话管理）
+    mcp_server_ctx = None
+    if MCP_SERVER_AVAILABLE and mumu_mcp_server is not None:
+        try:
+            session_manager = getattr(mumu_mcp_server, "session_manager", None)
+            if session_manager and hasattr(session_manager, "run"):
+                mcp_server_ctx = session_manager.run()
+                await mcp_server_ctx.__aenter__()
+                logger.info("✅ MuMu MCP Server 会话管理已启动")
+            else:
+                logger.warning("⚠️ MuMu MCP Server 未发现 session_manager.run()，跳过会话管理启动")
+        except Exception as e:
+            logger.error(f"❌ MuMu MCP Server 启动失败（将继续启动主应用）: {e}", exc_info=True)
     
     logger.info("应用启动完成")
     
@@ -36,6 +50,14 @@ async def lifespan(app: FastAPI):
     
     # 清理MCP插件
     await mcp_client.cleanup()
+
+    # 清理 MuMu MCP Server 会话管理
+    if mcp_server_ctx is not None:
+        try:
+            await mcp_server_ctx.__aexit__(None, None, None)
+            logger.info("✅ MuMu MCP Server 会话管理已关闭")
+        except Exception as e:
+            logger.warning(f"⚠️ MuMu MCP Server 会话管理关闭失败: {e}")
     
     # 清理HTTP客户端池
     from app.services.ai_service import cleanup_http_clients
@@ -53,6 +75,26 @@ app = FastAPI(
     description="AI写小说工具 - 智能小说创作助手",
     lifespan=lifespan
 )
+
+# 挂载 MuMu 对外 MCP Server
+if MCP_SERVER_AVAILABLE and mumu_mcp_server is not None:
+    try:
+        mcp_asgi_app = None
+        if hasattr(mumu_mcp_server, "streamable_http_app"):
+            mcp_asgi_app = mumu_mcp_server.streamable_http_app()
+        elif hasattr(mumu_mcp_server, "http_app"):
+            mcp_asgi_app = mumu_mcp_server.http_app()
+
+        if mcp_asgi_app is not None:
+            # 注意：如果 SDK 默认 path=/mcp，则最终访问路径为 /mcp/mcp
+            app.mount("/mcp", mcp_asgi_app)
+            logger.info("✅ MuMu MCP Server 已挂载，入口: /mcp（通常客户端连接 /mcp/mcp）")
+        else:
+            logger.warning("⚠️ 未找到可挂载的 MCP ASGI app（streamable_http_app/http_app）")
+    except Exception as e:
+        logger.error(f"❌ 挂载 MuMu MCP Server 失败: {e}", exc_info=True)
+else:
+    logger.warning("⚠️ MCP Server 依赖不可用，已跳过 /mcp 挂载")
 
 @app.exception_handler(RequestValidationError)
 async def validation_exception_handler(request: Request, exc: RequestValidationError):

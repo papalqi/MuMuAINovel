@@ -25,6 +25,7 @@
 
 from .facade import mcp_client, MCPClientFacade, MCPPluginConfig, MCPError, PluginStatus
 from .status_sync import register_status_sync
+from .server import mumu_mcp_server, MCP_SERVER_AVAILABLE
 
 __all__ = [
     "mcp_client",
@@ -33,4 +34,6 @@ __all__ = [
     "MCPError",
     "PluginStatus",
     "register_status_sync",
+    "mumu_mcp_server",
+    "MCP_SERVER_AVAILABLE",
 ]
