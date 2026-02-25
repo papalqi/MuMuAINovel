@@ -87,26 +87,28 @@ export default function TaskCenterFloating() {
 
   return (
     <>
-      <div
-        style={{
-          position: 'fixed',
-          right: isMobile ? 16 : 24,
-          bottom: `calc(env(safe-area-inset-bottom, 0px) + ${isMobile ? 16 : 24}px)`,
-          zIndex: 1200,
-        }}
-      >
-        <Badge count={failedCount} size="small">
-          <Tooltip title="任务中心">
-            <Button
-              type="primary"
-              shape="circle"
-              size="large"
-              icon={<UnorderedListOutlined />}
-              onClick={() => setVisible(true)}
-            />
-          </Tooltip>
-        </Badge>
-      </div>
+      {!visible && (
+        <div
+          style={{
+            position: 'fixed',
+            right: isMobile ? 16 : 24,
+            bottom: `calc(env(safe-area-inset-bottom, 0px) + ${isMobile ? 16 : 24}px)`,
+            zIndex: 1200,
+          }}
+        >
+          <Badge count={failedCount} size="small">
+            <Tooltip title="任务中心">
+              <Button
+                type="primary"
+                shape="circle"
+                size="large"
+                icon={<UnorderedListOutlined />}
+                onClick={() => setVisible(true)}
+              />
+            </Tooltip>
+          </Badge>
+        </div>
+      )}
 
       <Drawer
         title={
@@ -120,6 +122,7 @@ export default function TaskCenterFloating() {
         }
         open={visible}
         onClose={() => setVisible(false)}
+        zIndex={10020}
         placement={isMobile ? 'bottom' : 'right'}
         width={isMobile ? undefined : 460}
         height={isMobile ? '72vh' : undefined}
