@@ -2,7 +2,7 @@
 from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
-from typing import Dict, Any, AsyncGenerator
+from typing import Dict, Any, AsyncGenerator, Optional, List
 import json
 import re
 
@@ -24,6 +24,64 @@ from app.api.settings import get_user_ai_service_for_task
 
 router = APIRouter(prefix="/wizard-stream", tags=["项目创建向导(流式)"])
 logger = get_logger(__name__)
+
+
+def _extract_created_names(items: Optional[List[Any]]) -> List[str]:
+    if not items:
+        return []
+    names: List[str] = []
+    for item in items:
+        if isinstance(item, dict):
+            name = item.get("name")
+        else:
+            name = getattr(item, "name", None)
+        if isinstance(name, str) and name.strip():
+            names.append(name.strip())
+    return names
+
+
+def _build_postcheck_summary(
+    *,
+    char_result: Optional[Dict[str, Any]],
+    org_result: Optional[Dict[str, Any]],
+) -> Dict[str, Any]:
+    char_result = char_result or {}
+    org_result = org_result or {}
+
+    char_ok = bool(char_result.get("success", True))
+    org_ok = bool(org_result.get("success", True))
+    statuses = []
+    statuses.append("success" if char_ok else "warning")
+    statuses.append("success" if org_ok else "warning")
+
+    if all(x == "success" for x in statuses):
+        overall = "success"
+    elif all(x != "success" for x in statuses):
+        overall = "failed"
+    else:
+        overall = "partial_failed"
+
+    return {
+        "scope": "all",
+        "overall_status": overall,
+        "has_warning": overall != "success",
+        "total_created": int(char_result.get("created_count", 0) or 0)
+        + int(org_result.get("created_count", 0) or 0),
+        "characters": {
+            "status": "success" if char_ok else "warning",
+            "success": char_ok,
+            "created_count": int(char_result.get("created_count", 0) or 0),
+            "created_names": _extract_created_names(char_result.get("created_characters")),
+            "error": char_result.get("error"),
+        },
+        "organizations": {
+            "status": "success" if org_ok else "warning",
+            "success": org_ok,
+            "created_count": int(org_result.get("created_count", 0) or 0),
+            "created_names": _extract_created_names(org_result.get("created_organizations")),
+            "error": org_result.get("error"),
+        },
+    }
 
 
 async def world_building_generator(
@@ -1385,6 +1443,21 @@ async def outline_generator(
             await db.refresh(outline)
         
         logger.info(f"✅ 成功创建{len(created_outlines)}个大纲节点")
+
+        char_check_result: Dict[str, Any] = {
+            "success": True,
+            "created_count": 0,
+            "created_characters": [],
+            "missing_names": [],
+            "error": None,
+        }
+        org_check_result: Dict[str, Any] = {
+            "success": True,
+            "created_count": 0,
+            "created_organizations": [],
+            "missing_names": [],
+            "error": None,
+        }
         
         # 🎭 角色校验：检查大纲structure中的characters是否存在对应角色
         yield await tracker.saving("🎭 校验角色信息...", 0.5)
@@ -1399,8 +1472,13 @@ async def outline_generator(
                 user_id=user_id,
                 enable_mcp=enable_mcp
             )
+            char_check_result.setdefault("created_count", 0)
+            char_check_result.setdefault("created_characters", [])
+            char_check_result.setdefault("missing_names", [])
+            char_check_result.setdefault("error", None)
+            char_check_result["success"] = True
             if char_check_result["created_count"] > 0:
-                created_names = [c.name for c in char_check_result["created_characters"]]
+                created_names = _extract_created_names(char_check_result["created_characters"])
                 logger.info(f"🎭 向导大纲：自动创建了 {char_check_result['created_count']} 个角色: {', '.join(created_names)}")
                 yield await tracker.saving(
                     f"🎭 自动创建了 {char_check_result['created_count']} 个角色: {', '.join(created_names)}",
@@ -1408,6 +1486,14 @@ async def outline_generator(
                 )
         except Exception as e:
             logger.error(f"⚠️ 向导大纲角色校验失败（不影响主流程）: {e}")
+            char_check_result = {
+                "success": False,
+                "created_count": 0,
+                "created_characters": [],
+                "missing_names": [],
+                "error": str(e),
+            }
+            yield await tracker.warning(f"角色校验失败（主流程继续）: {e}")
         
         # 🏛️ 组织校验：检查大纲structure中的characters（type=organization）是否存在对应组织
         yield await tracker.saving("🏛️ 校验组织信息...", 0.55)
@@ -1422,8 +1508,13 @@ async def outline_generator(
                 user_id=user_id,
                 enable_mcp=enable_mcp
             )
+            org_check_result.setdefault("created_count", 0)
+            org_check_result.setdefault("created_organizations", [])
+            org_check_result.setdefault("missing_names", [])
+            org_check_result.setdefault("error", None)
+            org_check_result["success"] = True
             if org_check_result["created_count"] > 0:
-                created_names = [c.name for c in org_check_result["created_organizations"]]
+                created_names = _extract_created_names(org_check_result["created_organizations"])
                 logger.info(f"🏛️ 向导大纲：自动创建了 {org_check_result['created_count']} 个组织: {', '.join(created_names)}")
                 yield await tracker.saving(
                     f"🏛️ 自动创建了 {org_check_result['created_count']} 个组织: {', '.join(created_names)}",
@@ -1431,6 +1522,19 @@ async def outline_generator(
                 )
         except Exception as e:
             logger.error(f"⚠️ 向导大纲组织校验失败（不影响主流程）: {e}")
+            org_check_result = {
+                "success": False,
+                "created_count": 0,
+                "created_organizations": [],
+                "missing_names": [],
+                "error": str(e),
+            }
+            yield await tracker.warning(f"组织校验失败（主流程继续）: {e}")
+
+        postcheck_summary = _build_postcheck_summary(
+            char_result=char_check_result,
+            org_result=org_check_result,
+        )
         
         # 根据项目的大纲模式决定是否自动创建章节
         created_chapters = []
@@ -1494,6 +1598,7 @@ async def outline_generator(
             "outline_count": len(created_outlines),
             "chapter_count": len(created_chapters),
             "outline_mode": project.outline_mode,
+            "postcheck": postcheck_summary,
             "outlines": [
                 {
                     "id": outline.id,

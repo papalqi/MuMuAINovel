@@ -2,7 +2,7 @@
 from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, delete
-from typing import List, AsyncGenerator, Dict, Any
+from typing import List, AsyncGenerator, Dict, Any, Optional
 import json
 
 from app.database import get_db
@@ -53,6 +53,137 @@ def _build_characters_info(characters: List[Character]) -> str:
         f"{char.personality[:100] if char.personality else '暂无描述'}"
         for char in characters
     ])
+
+
+def _extract_created_names(items: Optional[List[Any]]) -> List[str]:
+    """从对象列表中提取名称，兼容 ORM 对象 / dict / str。"""
+    if not items:
+        return []
+
+    names: List[str] = []
+    for item in items:
+        name = None
+        if isinstance(item, dict):
+            name = item.get("name")
+        elif isinstance(item, str):
+            name = item
+        else:
+            name = getattr(item, "name", None)
+        if isinstance(name, str) and name.strip():
+            names.append(name.strip())
+    return names
+
+
+def _normalize_postcheck_item(
+    *,
+    section: str,
+    raw_result: Optional[Dict[str, Any]],
+) -> Dict[str, Any]:
+    """
+    规范化后处理结果（角色/组织）。
+
+    section:
+      - characters
+      - organizations
+    """
+    raw = raw_result or {}
+
+    created_key = "created_characters" if section == "characters" else "created_organizations"
+    created_items = raw.get(created_key) or []
+    created_names = _extract_created_names(created_items)
+    missing_names = raw.get("missing_names") or []
+    success = bool(raw.get("success", True))
+    error = raw.get("error")
+
+    status = "success" if success else "warning"
+
+    return {
+        "status": status,
+        "success": success,
+        "created_count": int(raw.get("created_count", 0) or 0),
+        "created_names": created_names,
+        "missing_names": [x for x in missing_names if isinstance(x, str)],
+        "error": str(error) if error else None,
+    }
+
+
+def _build_postcheck_summary(
+    *,
+    scope: str,
+    char_result: Optional[Dict[str, Any]] = None,
+    org_result: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """构建统一的后处理摘要，便于 UI 与 MCP 消费。"""
+    include_characters = scope in {"all", "characters"}
+    include_organizations = scope in {"all", "organizations"}
+
+    characters = (
+        _normalize_postcheck_item(section="characters", raw_result=char_result)
+        if include_characters
+        else None
+    )
+    organizations = (
+        _normalize_postcheck_item(section="organizations", raw_result=org_result)
+        if include_organizations
+        else None
+    )
+
+    active_sections = [x for x in [characters, organizations] if x is not None]
+    warning_sections = [x for x in active_sections if x.get("status") != "success"]
+
+    if not active_sections:
+        overall_status = "success"
+    elif len(warning_sections) == len(active_sections):
+        overall_status = "failed"
+    elif warning_sections:
+        overall_status = "partial_failed"
+    else:
+        overall_status = "success"
+
+    total_created = sum(int(x.get("created_count", 0) or 0) for x in active_sections)
+
+    return {
+        "scope": scope,
+        "overall_status": overall_status,
+        "has_warning": bool(warning_sections),
+        "total_created": total_created,
+        "characters": characters,
+        "organizations": organizations,
+    }
+
+
+def _extract_outline_data_for_postcheck(outlines: List[Outline]) -> List[Dict[str, Any]]:
+    """
+    从大纲记录中提取后处理所需结构数据（兼容 structure 异常场景）。
+    """
+    rows: List[Dict[str, Any]] = []
+    for outline in outlines:
+        parsed: Optional[Any] = None
+        if outline.structure:
+            try:
+                parsed = json.loads(outline.structure)
+            except Exception:
+                logger.warning(f"大纲 {outline.id} 的 structure 解析失败，后处理将使用降级数据")
+
+        if isinstance(parsed, dict):
+            rows.append(parsed)
+            continue
+        if isinstance(parsed, list):
+            for item in parsed:
+                if isinstance(item, dict):
+                    rows.append(item)
+            if parsed:
+                continue
+
+        # 降级：至少保留标题/摘要，characters 留空
+        rows.append(
+            {
+                "title": outline.title or f"第{outline.order_index}章",
+                "summary": outline.content or "",
+                "characters": [],
+            }
+        )
+    return rows
 
 
 @router.post("", response_model=OutlineResponse, summary="创建大纲")
@@ -713,7 +844,13 @@ async def _check_and_create_missing_characters_from_outlines(
         tracker: 可选，WizardProgressTracker用于发送进度
         
     Returns:
-        {"created_count": int, "created_characters": list}
+        {
+          "success": bool,
+          "created_count": int,
+          "created_characters": list,
+          "missing_names": list,
+          "error": Optional[str]
+        }
     """
     try:
         from app.services.auto_character_service import get_auto_character_service
@@ -734,6 +871,12 @@ async def _check_and_create_missing_characters_from_outlines(
             enable_mcp=enable_mcp,
             progress_callback=progress_cb
         )
+
+        result.setdefault("created_count", 0)
+        result.setdefault("created_characters", [])
+        result.setdefault("missing_names", [])
+        result["success"] = True
+        result["error"] = None
         
         if result["created_count"] > 0:
             logger.info(
@@ -745,7 +888,13 @@ async def _check_and_create_missing_characters_from_outlines(
         
     except Exception as e:
         logger.error(f"⚠️ 【角色校验】校验失败（不影响主流程）: {e}", exc_info=True)
-        return {"created_count": 0, "created_characters": []}
+        return {
+            "success": False,
+            "created_count": 0,
+            "created_characters": [],
+            "missing_names": [],
+            "error": str(e),
+        }
 
 
 async def _check_and_create_missing_organizations_from_outlines(
@@ -771,7 +920,13 @@ async def _check_and_create_missing_organizations_from_outlines(
         tracker: 可选，WizardProgressTracker用于发送进度
         
     Returns:
-        {"created_count": int, "created_organizations": list}
+        {
+          "success": bool,
+          "created_count": int,
+          "created_organizations": list,
+          "missing_names": list,
+          "error": Optional[str]
+        }
     """
     try:
         from app.services.auto_organization_service import get_auto_organization_service
@@ -791,6 +946,12 @@ async def _check_and_create_missing_organizations_from_outlines(
             enable_mcp=enable_mcp,
             progress_callback=progress_cb
         )
+
+        result.setdefault("created_count", 0)
+        result.setdefault("created_organizations", [])
+        result.setdefault("missing_names", [])
+        result["success"] = True
+        result["error"] = None
         
         if result["created_count"] > 0:
             logger.info(
@@ -802,7 +963,13 @@ async def _check_and_create_missing_organizations_from_outlines(
         
     except Exception as e:
         logger.error(f"⚠️ 【组织校验】校验失败（不影响主流程）: {e}", exc_info=True)
-        return {"created_count": 0, "created_organizations": []}
+        return {
+            "success": False,
+            "created_count": 0,
+            "created_organizations": [],
+            "missing_names": [],
+            "error": str(e),
+        }
 
 
 class JSONParseError(Exception):
@@ -1206,6 +1373,21 @@ async def new_outline_generator(
         outlines = await _save_outlines(
             project_id, outline_data, db, start_index=1
         )
+
+        char_check_result: Dict[str, Any] = {
+            "success": True,
+            "created_count": 0,
+            "created_characters": [],
+            "missing_names": [],
+            "error": None,
+        }
+        org_check_result: Dict[str, Any] = {
+            "success": True,
+            "created_count": 0,
+            "created_organizations": [],
+            "missing_names": [],
+            "error": None,
+        }
         
         # 🎭 角色校验：检查大纲structure中的characters是否存在对应角色
         yield await tracker.saving("🎭 校验角色信息...", 0.7)
@@ -1219,7 +1401,10 @@ async def new_outline_generator(
                 enable_mcp=data.get("enable_mcp", True),
                 tracker=tracker
             )
-            if char_check_result["created_count"] > 0:
+            if not char_check_result.get("success", True):
+                error_msg = char_check_result.get("error") or "未知错误"
+                yield await tracker.warning(f"角色校验失败（主流程继续）: {error_msg}")
+            elif char_check_result["created_count"] > 0:
                 created_names = [c.name for c in char_check_result["created_characters"]]
                 yield await tracker.saving(
                     f"🎭 自动创建了 {char_check_result['created_count']} 个角色: {', '.join(created_names)}",
@@ -1227,6 +1412,14 @@ async def new_outline_generator(
                 )
         except Exception as e:
             logger.error(f"⚠️ 角色校验失败（不影响主流程）: {e}")
+            char_check_result = {
+                "success": False,
+                "created_count": 0,
+                "created_characters": [],
+                "missing_names": [],
+                "error": str(e),
+            }
+            yield await tracker.warning(f"角色校验失败（主流程继续）: {e}")
         
         # 🏛️ 组织校验：检查大纲structure中的characters（type=organization）是否存在对应组织
         yield await tracker.saving("🏛️ 校验组织信息...", 0.75)
@@ -1240,7 +1433,10 @@ async def new_outline_generator(
                 enable_mcp=data.get("enable_mcp", True),
                 tracker=tracker
             )
-            if org_check_result["created_count"] > 0:
+            if not org_check_result.get("success", True):
+                error_msg = org_check_result.get("error") or "未知错误"
+                yield await tracker.warning(f"组织校验失败（主流程继续）: {error_msg}")
+            elif org_check_result["created_count"] > 0:
                 created_names = [c.name for c in org_check_result["created_organizations"]]
                 yield await tracker.saving(
                     f"🏛️ 自动创建了 {org_check_result['created_count']} 个组织: {', '.join(created_names)}",
@@ -1248,6 +1444,20 @@ async def new_outline_generator(
                 )
         except Exception as e:
             logger.error(f"⚠️ 组织校验失败（不影响主流程）: {e}")
+            org_check_result = {
+                "success": False,
+                "created_count": 0,
+                "created_organizations": [],
+                "missing_names": [],
+                "error": str(e),
+            }
+            yield await tracker.warning(f"组织校验失败（主流程继续）: {e}")
+
+        postcheck_summary = _build_postcheck_summary(
+            scope="all",
+            char_result=char_check_result,
+            org_result=org_check_result,
+        )
         
         # 记录历史
         history = GenerationHistory(
@@ -1272,6 +1482,7 @@ async def new_outline_generator(
         yield await tracker.result({
             "message": f"成功生成{len(outlines)}章大纲",
             "total_chapters": len(outlines),
+            "postcheck": postcheck_summary,
             "outlines": [
                 {
                     "id": outline.id,
@@ -1373,6 +1584,11 @@ async def continue_outline_generator(
         # === 批次生成阶段 ===
         all_new_outlines = []
         current_start_chapter = last_chapter_number + 1
+        postcheck_batches: List[Dict[str, Any]] = []
+        all_created_character_names: List[str] = []
+        all_created_org_names: List[str] = []
+        char_errors: List[str] = []
+        org_errors: List[str] = []
         
         for batch_num in range(total_batches):
             # 计算当前批次的章节数
@@ -1554,6 +1770,13 @@ async def continue_outline_generator(
             )
             
             # 🎭 角色校验：检查本批大纲structure中的characters是否存在对应角色
+            char_check_result: Dict[str, Any] = {
+                "success": True,
+                "created_count": 0,
+                "created_characters": [],
+                "missing_names": [],
+                "error": None,
+            }
             try:
                 char_check_result = await _check_and_create_missing_characters_from_outlines(
                     outline_data=outline_data,
@@ -1564,19 +1787,40 @@ async def continue_outline_generator(
                     enable_mcp=data.get("enable_mcp", True),
                     tracker=tracker
                 )
-                if char_check_result["created_count"] > 0:
-                    created_names = [c.name for c in char_check_result["created_characters"]]
+                if not char_check_result.get("success", True):
+                    error_msg = char_check_result.get("error") or "未知错误"
+                    char_errors.append(f"第{batch_num + 1}批: {error_msg}")
+                    yield await tracker.warning(f"🎭 第{batch_num + 1}批角色校验失败（主流程继续）: {error_msg}")
+                elif char_check_result["created_count"] > 0:
+                    created_names = _extract_created_names(char_check_result["created_characters"])
                     yield await tracker.saving(
                         f"🎭 第{str(batch_num + 1)}批：自动创建了 {char_check_result['created_count']} 个角色: {', '.join(created_names)}",
                         (batch_num + 1) / total_batches * 0.5
                     )
+                    all_created_character_names.extend(created_names)
                     # 更新角色列表（供后续批次使用）
                     characters.extend(char_check_result["created_characters"])
                     characters_info = _build_characters_info(characters)
             except Exception as e:
                 logger.error(f"⚠️ 第{batch_num + 1}批角色校验失败（不影响主流程）: {e}")
+                char_check_result = {
+                    "success": False,
+                    "created_count": 0,
+                    "created_characters": [],
+                    "missing_names": [],
+                    "error": str(e),
+                }
+                char_errors.append(f"第{batch_num + 1}批: {e}")
+                yield await tracker.warning(f"🎭 第{batch_num + 1}批角色校验失败（主流程继续）: {e}")
             
             # 🏛️ 组织校验：检查本批大纲structure中的characters（type=organization）是否存在对应组织
+            org_check_result: Dict[str, Any] = {
+                "success": True,
+                "created_count": 0,
+                "created_organizations": [],
+                "missing_names": [],
+                "error": None,
+            }
             try:
                 org_check_result = await _check_and_create_missing_organizations_from_outlines(
                     outline_data=outline_data,
@@ -1587,17 +1831,45 @@ async def continue_outline_generator(
                     enable_mcp=data.get("enable_mcp", True),
                     tracker=tracker
                 )
-                if org_check_result["created_count"] > 0:
-                    created_names = [c.name for c in org_check_result["created_organizations"]]
+                if not org_check_result.get("success", True):
+                    error_msg = org_check_result.get("error") or "未知错误"
+                    org_errors.append(f"第{batch_num + 1}批: {error_msg}")
+                    yield await tracker.warning(f"🏛️ 第{batch_num + 1}批组织校验失败（主流程继续）: {error_msg}")
+                elif org_check_result["created_count"] > 0:
+                    created_names = _extract_created_names(org_check_result["created_organizations"])
                     yield await tracker.saving(
                         f"🏛️ 第{str(batch_num + 1)}批：自动创建了 {org_check_result['created_count']} 个组织: {', '.join(created_names)}",
                         (batch_num + 1) / total_batches * 0.55
                     )
+                    all_created_org_names.extend(created_names)
                     # 更新角色列表（组织也是Character，供后续批次使用）
                     characters.extend(org_check_result["created_organizations"])
                     characters_info = _build_characters_info(characters)
             except Exception as e:
                 logger.error(f"⚠️ 第{batch_num + 1}批组织校验失败（不影响主流程）: {e}")
+                org_check_result = {
+                    "success": False,
+                    "created_count": 0,
+                    "created_organizations": [],
+                    "missing_names": [],
+                    "error": str(e),
+                }
+                org_errors.append(f"第{batch_num + 1}批: {e}")
+                yield await tracker.warning(f"🏛️ 第{batch_num + 1}批组织校验失败（主流程继续）: {e}")
+
+            postcheck_batches.append(
+                {
+                    "batch": batch_num + 1,
+                    "characters": _normalize_postcheck_item(
+                        section="characters",
+                        raw_result=char_check_result,
+                    ),
+                    "organizations": _normalize_postcheck_item(
+                        section="organizations",
+                        raw_result=org_check_result,
+                    ),
+                }
+            )
             
             # 记录历史
             history = GenerationHistory(
@@ -1633,6 +1905,30 @@ async def continue_outline_generator(
             .order_by(Outline.order_index)
         )
         all_outlines = final_result.scalars().all()
+
+        unique_char_names = list(dict.fromkeys(all_created_character_names))
+        unique_org_names = list(dict.fromkeys(all_created_org_names))
+
+        char_agg_result = {
+            "success": len(char_errors) == 0,
+            "created_count": len(unique_char_names),
+            "created_characters": [{"name": n} for n in unique_char_names],
+            "missing_names": [],
+            "error": "; ".join(char_errors) if char_errors else None,
+        }
+        org_agg_result = {
+            "success": len(org_errors) == 0,
+            "created_count": len(unique_org_names),
+            "created_organizations": [{"name": n} for n in unique_org_names],
+            "missing_names": [],
+            "error": "; ".join(org_errors) if org_errors else None,
+        }
+        postcheck_summary = _build_postcheck_summary(
+            scope="all",
+            char_result=char_agg_result,
+            org_result=org_agg_result,
+        )
+        postcheck_summary["batches"] = postcheck_batches
         
         yield await tracker.complete()
         
@@ -1642,6 +1938,7 @@ async def continue_outline_generator(
             "total_batches": total_batches,
             "new_chapters": len(all_new_outlines),
             "total_chapters": len(all_outlines),
+            "postcheck": postcheck_summary,
             "outlines": [
                 {
                     "id": outline.id,
@@ -1738,6 +2035,178 @@ async def generate_outline_stream(
             status_code=400,
             detail=f"不支持的模式: {mode}"
         )
+
+
+async def outline_postcheck_generator(
+    data: Dict[str, Any],
+    db: AsyncSession,
+    user_ai_service: AIService,
+    user_id: str = "system",
+) -> AsyncGenerator[str, None]:
+    """
+    大纲后处理补全（角色/组织）SSE生成器。
+
+    入参：
+    - project_id: 项目ID（必填）
+    - scope: all / characters / organizations（默认 all）
+    - outline_ids: 可选，仅对指定大纲进行后处理
+    - enable_mcp: 是否启用 MCP（默认 true）
+    """
+    db_committed = False
+    tracker = WizardProgressTracker("大纲后处理")
+
+    try:
+        yield await tracker.start("开始执行大纲后处理补全...")
+
+        project_id = data.get("project_id")
+        if not project_id:
+            yield await tracker.error("project_id 是必需参数", 400)
+            return
+
+        scope_raw = str(data.get("scope", "all") or "all").strip().lower()
+        if scope_raw not in {"all", "characters", "organizations"}:
+            yield await tracker.error("scope 仅支持 all / characters / organizations", 400)
+            return
+
+        outline_ids = data.get("outline_ids")
+        if outline_ids is not None and not isinstance(outline_ids, list):
+            yield await tracker.error("outline_ids 必须是数组", 400)
+            return
+        outline_ids = [str(x) for x in (outline_ids or []) if str(x).strip()]
+
+        # 验证项目存在
+        yield await tracker.loading("加载项目信息...", 0.3)
+        project_result = await db.execute(select(Project).where(Project.id == project_id))
+        project = project_result.scalar_one_or_none()
+        if not project:
+            yield await tracker.error("项目不存在", 404)
+            return
+
+        # 读取目标大纲
+        yield await tracker.loading("读取目标大纲...", 0.6)
+        q = select(Outline).where(Outline.project_id == project_id)
+        if outline_ids:
+            q = q.where(Outline.id.in_(outline_ids))
+        q = q.order_by(Outline.order_index)
+        outlines_result = await db.execute(q)
+        outlines = list(outlines_result.scalars().all())
+
+        if not outlines:
+            yield await tracker.error("未找到可处理的大纲", 404)
+            return
+
+        outline_data = _extract_outline_data_for_postcheck(outlines)
+        enable_mcp = data.get("enable_mcp", True)
+
+        if user_id:
+            user_ai_service.user_id = user_id
+            user_ai_service.db_session = db
+
+        char_result: Optional[Dict[str, Any]] = None
+        org_result: Optional[Dict[str, Any]] = None
+
+        if scope_raw in {"all", "characters"}:
+            yield await tracker.saving("🎭 校验并补全角色...", 0.72)
+            char_result = await _check_and_create_missing_characters_from_outlines(
+                outline_data=outline_data,
+                project_id=project_id,
+                db=db,
+                user_ai_service=user_ai_service,
+                user_id=user_id,
+                enable_mcp=enable_mcp,
+                tracker=tracker,
+            )
+            if not char_result.get("success", True):
+                yield await tracker.warning(
+                    f"角色补全失败（主流程继续）: {char_result.get('error') or '未知错误'}"
+                )
+            elif int(char_result.get("created_count", 0) or 0) > 0:
+                names = _extract_created_names(char_result.get("created_characters"))
+                yield await tracker.saving(
+                    f"🎭 自动创建了 {char_result.get('created_count', 0)} 个角色: {', '.join(names)}",
+                    0.8,
+                )
+
+        if scope_raw in {"all", "organizations"}:
+            yield await tracker.saving("🏛️ 校验并补全组织/地点...", 0.82)
+            org_result = await _check_and_create_missing_organizations_from_outlines(
+                outline_data=outline_data,
+                project_id=project_id,
+                db=db,
+                user_ai_service=user_ai_service,
+                user_id=user_id,
+                enable_mcp=enable_mcp,
+                tracker=tracker,
+            )
+            if not org_result.get("success", True):
+                yield await tracker.warning(
+                    f"组织补全失败（主流程继续）: {org_result.get('error') or '未知错误'}"
+                )
+            elif int(org_result.get("created_count", 0) or 0) > 0:
+                names = _extract_created_names(org_result.get("created_organizations"))
+                yield await tracker.saving(
+                    f"🏛️ 自动创建了 {org_result.get('created_count', 0)} 个组织: {', '.join(names)}",
+                    0.88,
+                )
+
+        await db.commit()
+        db_committed = True
+
+        postcheck_summary = _build_postcheck_summary(
+            scope=scope_raw,
+            char_result=char_result,
+            org_result=org_result,
+        )
+
+        # 额外返回项目当前的角色/组织统计
+        chars_result = await db.execute(
+            select(Character).where(Character.project_id == project_id)
+        )
+        all_chars = list(chars_result.scalars().all())
+        total_characters = len([c for c in all_chars if not c.is_organization])
+        total_organizations = len([c for c in all_chars if c.is_organization])
+
+        yield await tracker.complete("大纲后处理补全完成")
+        yield await tracker.result(
+            {
+                "message": "大纲后处理补全完成",
+                "project_id": project_id,
+                "outline_count": len(outlines),
+                "scope": scope_raw,
+                "postcheck": postcheck_summary,
+                "project_snapshot": {
+                    "total_characters": total_characters,
+                    "total_organizations": total_organizations,
+                },
+            }
+        )
+        yield await tracker.done()
+
+    except GeneratorExit:
+        logger.warning("大纲后处理生成器被提前关闭")
+        if not db_committed and db.in_transaction():
+            await db.rollback()
+            logger.info("大纲后处理事务已回滚（GeneratorExit）")
+    except Exception as e:
+        logger.error(f"大纲后处理失败: {str(e)}", exc_info=True)
+        if not db_committed and db.in_transaction():
+            await db.rollback()
+            logger.info("大纲后处理事务已回滚（异常）")
+        yield await tracker.error(f"后处理失败: {str(e)}")
+
+
+@router.post("/postcheck-stream", summary="大纲后处理补全（角色/组织，SSE流式）")
+async def outline_postcheck_stream(
+    data: Dict[str, Any],
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    user_ai_service: AIService = Depends(get_user_ai_service_for_task("outline_generate")),
+):
+    """手动触发大纲后处理补全，支持按 scope 选择角色/组织。"""
+    user_id = getattr(request.state, "user_id", None)
+    project_id = data.get("project_id")
+    await verify_project_access(project_id, user_id, db)
+    return create_sse_response(outline_postcheck_generator(data, db, user_ai_service, user_id or "system"))
 
 
 async def expand_outline_generator(
