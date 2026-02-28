@@ -1523,6 +1523,15 @@ async def generate_chapter_content_stream(
                     '第三人称'
                 )
                 logger.info(f"📝 使用叙事人称: {chapter_perspective}")
+
+                # 📌 项目硬设定（不可变事实）
+                # 说明：
+                # - 用于锁死“人名/封号官职/府邸称谓/亲缘关系/婚约对象/时间地点”等关键事实，防止长文生成写串。
+                # - 当前复用 Project.world_rules 字段作为“硬设定承载位”（同时兼容原有世界规则）。
+                hard_settings = (project.world_rules or "").strip()
+                if not hard_settings:
+                    hard_settings = "（暂无硬设定/世界规则。请在项目设置→世界规则中补充：关键人物称谓、婚约对象、势力归属等不可变事实。）"
+                logger.info(f"📌 硬设定长度: {len(hard_settings)} 字符")
                 
                 # 🚀 根据大纲模式选择提示词模板和参数
                 if outline_mode == 'one-to-one':
@@ -1536,6 +1545,7 @@ async def generate_chapter_content_stream(
                             chapter_number=current_chapter.chapter_number,
                             chapter_title=current_chapter.title,
                             chapter_outline=chapter_context.chapter_outline,
+                            hard_settings=hard_settings,
                             target_word_count=target_word_count,
                             genre=project.genre or '未设定',
                             narrative_perspective=chapter_perspective,
@@ -1556,6 +1566,7 @@ async def generate_chapter_content_stream(
                             chapter_number=current_chapter.chapter_number,
                             chapter_title=current_chapter.title,
                             chapter_outline=chapter_context.chapter_outline,
+                            hard_settings=hard_settings,
                             target_word_count=target_word_count,
                             genre=project.genre or '未设定',
                             narrative_perspective=chapter_perspective,
@@ -1583,6 +1594,7 @@ async def generate_chapter_content_stream(
                             chapter_number=current_chapter.chapter_number,
                             chapter_title=current_chapter.title,
                             chapter_outline=chapter_context.chapter_outline,
+                            hard_settings=hard_settings,
                             target_word_count=target_word_count,
                             continuation_point=chapter_context.continuation_point,
                             genre=project.genre or '未设定',
@@ -1605,6 +1617,7 @@ async def generate_chapter_content_stream(
                             chapter_number=current_chapter.chapter_number,
                             chapter_title=current_chapter.title,
                             chapter_outline=chapter_context.chapter_outline,
+                            hard_settings=hard_settings,
                             target_word_count=target_word_count,
                             genre=project.genre or '未设定',
                             narrative_perspective=chapter_perspective,
@@ -1626,23 +1639,44 @@ async def generate_chapter_content_stream(
                 
                 logger.info(f"开始AI流式创作章节 {chapter_id}")
                 
-                # 🎨 方案一：将写作风格注入到系统提示词（最高优先级）
-                system_prompt_with_style = None
+                # 🎨 系统提示词拼装（最高优先级）
+                # - 兼容用户自定义 system_prompt（若有）
+                # - 注入“硬设定”以防止写串（最高优先级）
+                # - 如有写作风格，则同样注入
+                system_prompt_parts: list[str] = []
+                base_system_prompt = (getattr(user_ai_service, "default_system_prompt", None) or "").strip()
+                if base_system_prompt:
+                    system_prompt_parts.append(base_system_prompt)
+                
+                if hard_settings:
+                    system_prompt_parts.append(f"""【📌 项目硬设定（不可变事实） - 最高优先级】
+
+{hard_settings}
+
+⚠️ 必须严格遵守以上设定，严禁写错/混淆：人名、封号官职、府邸称谓、亲缘关系、婚约对象、时间地点。""")
+                
                 if style_content:
-                    system_prompt_with_style = f"""【🎨 写作风格要求 - 最高优先级】
+                    system_prompt_parts.append(f"""【🎨 写作风格要求 - 最高优先级】
 
 {style_content}
 
 ⚠️ 请严格遵循上述写作风格要求进行创作，这是最重要的指令！
-确保在整个章节创作过程中始终保持风格的一致性。"""
-                    logger.info(f"✅ 已将写作风格注入系统提示词（{len(style_content)}字符）")
+确保在整个章节创作过程中始终保持风格的一致性。""")
+                
+                system_prompt_with_style = "\n\n".join([p for p in system_prompt_parts if p.strip()]) or None
+                if system_prompt_with_style:
+                    logger.info(f"✅ 已注入系统提示词（硬设定:{len(hard_settings)}字符，风格:{len(style_content or '')}字符）")
                 
                 # 🔢 计算 max_tokens 限制
-                # 中文字符约 1.5-2 个 token，使用 2.5 倍系数确保有足够空间完成段落
-                # 同时设置上限防止过长，下限确保基本可用
-                calculated_max_tokens = int(target_word_count * 3)
-                calculated_max_tokens = max(2000, min(calculated_max_tokens, 16000))  # 限制在 2000-16000 之间
-                logger.info(f"📊 目标字数: {target_word_count}, 计算 max_tokens: {calculated_max_tokens}")
+                # NOTE:
+                # - 数据库字数统计使用 len(full_content)（近似“中文字符数”）。
+                # - 许多模型的 token/字 比例并不稳定（尤其中文可能出现多字合并 token），
+                #   之前使用 3 倍系数会让模型严重超写，导致项目总字数失控。
+                # - 这里改为更保守的系数，用 max_tokens 作为“硬上限”，让模型必须在
+                #   接近 target_word_count 处收束。
+                calculated_max_tokens = int(target_word_count * 1.4)
+                calculated_max_tokens = max(800, min(calculated_max_tokens, 12000))  # 限制在 800-12000 之间
+                logger.info(f"📊 目标字数: {target_word_count}, max_tokens(硬上限): {calculated_max_tokens}")
                 
                 # 准备生成参数
                 generate_kwargs = {
@@ -2838,6 +2872,11 @@ async def generate_single_chapter_for_batch(
     logger.info(f"  - 衔接锚点长度: {len(chapter_context.continuation_point or '')} 字符")
     logger.info(f"  - 相关记忆: {chapter_context.context_stats.get('memory_count', 0)} 条")
     logger.info(f"  - 总上下文长度: {chapter_context.context_stats.get('total_length', 0)} 字符")
+
+    # 📌 项目硬设定（不可变事实）- 批量生成同样需要锁死关键事实，避免写串
+    hard_settings = (project.world_rules or "").strip()
+    if not hard_settings:
+        hard_settings = "（暂无硬设定/世界规则。请在项目设置→世界规则中补充：关键人物称谓、婚约对象、势力归属等不可变事实。）"
     
     # 🚀 根据大纲模式选择提示词模板（批量生成）
     # 统一使用 context_builder 构建的 chapter_context 结果，与单章生成保持一致
@@ -2852,6 +2891,7 @@ async def generate_single_chapter_for_batch(
                 chapter_number=chapter.chapter_number,
                 chapter_title=chapter.title,
                 chapter_outline=chapter_context.chapter_outline,
+                hard_settings=hard_settings,
                 target_word_count=target_word_count,
                 genre=project.genre or '未设定',
                 narrative_perspective=project.narrative_perspective or '第三人称',
@@ -2871,6 +2911,7 @@ async def generate_single_chapter_for_batch(
                 chapter_number=chapter.chapter_number,
                 chapter_title=chapter.title,
                 chapter_outline=chapter_context.chapter_outline,
+                hard_settings=hard_settings,
                 target_word_count=target_word_count,
                 genre=project.genre or '未设定',
                 narrative_perspective=project.narrative_perspective or '第三人称',
@@ -2898,6 +2939,7 @@ async def generate_single_chapter_for_batch(
                 chapter_number=chapter.chapter_number,
                 chapter_title=chapter.title,
                 chapter_outline=chapter_context.chapter_outline,
+                hard_settings=hard_settings,
                 target_word_count=target_word_count,
                 continuation_point=chapter_context.continuation_point,
                 genre=project.genre or '未设定',
@@ -2918,6 +2960,7 @@ async def generate_single_chapter_for_batch(
                 chapter_number=chapter.chapter_number,
                 chapter_title=chapter.title,
                 chapter_outline=chapter_context.chapter_outline,
+                hard_settings=hard_settings,
                 target_word_count=target_word_count,
                 genre=project.genre or '未设定',
                 narrative_perspective=project.narrative_perspective or '第三人称',
@@ -2933,23 +2976,35 @@ async def generate_single_chapter_for_batch(
     else:
         prompt = base_prompt
     
-    # 🎨 方案一：将写作风格注入到系统提示词（批量生成）
-    system_prompt_with_style = None
+    # 🎨 系统提示词拼装（批量生成，最高优先级）
+    system_prompt_parts: list[str] = []
+    base_system_prompt = (getattr(ai_service, "default_system_prompt", None) or "").strip()
+    if base_system_prompt:
+        system_prompt_parts.append(base_system_prompt)
+    
+    if hard_settings:
+        system_prompt_parts.append(f"""【📌 项目硬设定（不可变事实） - 最高优先级】
+
+{hard_settings}
+
+⚠️ 必须严格遵守以上设定，严禁写错/混淆：人名、封号官职、府邸称谓、亲缘关系、婚约对象、时间地点。""")
+    
     if style_content:
-        system_prompt_with_style = f"""【🎨 写作风格要求 - 最高优先级】
+        system_prompt_parts.append(f"""【🎨 写作风格要求 - 最高优先级】
 
 {style_content}
 
 ⚠️ 请严格遵循上述写作风格要求进行创作，这是最重要的指令！
-确保在整个章节创作过程中始终保持风格的一致性。"""
-        logger.info(f"✅ 批量生成 - 已将写作风格注入系统提示词（{len(style_content)}字符）")
+确保在整个章节创作过程中始终保持风格的一致性。""")
+        logger.info(f"✅ 批量生成 - 已注入写作风格（{len(style_content)}字符）")
+    
+    system_prompt_with_style = "\n\n".join([p for p in system_prompt_parts if p.strip()]) or None
     
     # 🔢 计算 max_tokens 限制（批量生成）
-    # 中文字符约 1.5-2 个 token，使用 2.5 倍系数确保有足够空间完成段落
-    # 同时设置上限防止过长，下限确保基本可用
-    calculated_max_tokens = int(target_word_count * 3)
-    calculated_max_tokens = max(2000, min(calculated_max_tokens, 16000))  # 限制在 2000-16000 之间
-    logger.info(f"📊 批量生成 - 目标字数: {target_word_count}, 计算 max_tokens: {calculated_max_tokens}")
+    # 参见流式生成处的说明：使用更保守的系数，避免章节严重超写。
+    calculated_max_tokens = int(target_word_count * 1.4)
+    calculated_max_tokens = max(800, min(calculated_max_tokens, 12000))  # 限制在 800-12000 之间
+    logger.info(f"📊 批量生成 - 目标字数: {target_word_count}, max_tokens(硬上限): {calculated_max_tokens}")
     
     # 非流式生成内容
     full_content = ""

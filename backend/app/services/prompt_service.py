@@ -519,6 +519,11 @@ class PromptService:
 - 叙事视角：{narrative_perspective}
 </task>
 
+<hard_settings priority="P0">
+【项目硬设定（不可变事实，必须遵守）】
+{hard_settings}
+</hard_settings>
+
 <outline priority="P0">
 【本章大纲 - 必须遵循】
 {chapter_outline}
@@ -551,6 +556,7 @@ class PromptService:
 
 <constraints>
 【必须遵守】
+✅ 严格遵守“项目硬设定（不可变事实）”，不得写错/混淆人名、封号官职、府邸称谓、亲缘关系、婚约对象、时间地点
 ✅ 严格按照大纲推进情节
 ✅ 保持角色性格、说话方式一致
 ✅ 角色互动须符合关系设定（师徒、朋友、敌对等）
@@ -563,6 +569,7 @@ class PromptService:
 ❌ 使用"总之"、"综上所述"等AI常见总结语
 ❌ 在结尾处使用开放式反问
 ❌ 添加作者注释或创作说明
+❌ 擅自修改/新增与“项目硬设定”相冲突的设定（包括但不限于：人物姓名/称谓/关系/婚约对象/势力归属）
 ❌ 角色行为超出其职业阶段的能力范围
 </constraints>
 
@@ -587,6 +594,11 @@ class PromptService:
 - 目标字数：{target_word_count}字（允许±200字浮动）
 - 叙事视角：{narrative_perspective}
 </task>
+
+<hard_settings priority="P0">
+【项目硬设定（不可变事实，必须遵守）】
+{hard_settings}
+</hard_settings>
 
 <outline priority="P0">
 【本章大纲】
@@ -615,6 +627,7 @@ class PromptService:
 
 <constraints>
 【必须遵守】
+✅ 严格遵守“项目硬设定（不可变事实）”，不得写错/混淆人名、封号官职、府邸称谓、亲缘关系、婚约对象、时间地点
 ✅ 严格按照大纲推进情节
 ✅ 保持角色性格、说话方式一致
 ✅ 字数需要严格控制在目标字数内
@@ -624,6 +637,7 @@ class PromptService:
 ❌ 输出章节标题、序号等元信息
 ❌ 使用"总之"、"综上所述"等AI常见总结语
 ❌ 添加作者注释或创作说明
+❌ 擅自修改/新增与“项目硬设定”相冲突的设定（包括但不限于：人物姓名/称谓/关系/婚约对象/势力归属）
 ❌ 生成字数禁止超过目标字数
 </constraints>
 
@@ -648,6 +662,11 @@ class PromptService:
 - 目标字数：{target_word_count}字（允许±200字浮动）
 - 叙事视角：{narrative_perspective}
 </task>
+
+<hard_settings priority="P0">
+【项目硬设定（不可变事实，必须遵守）】
+{hard_settings}
+</hard_settings>
 
 <outline priority="P0">
 【本章大纲】
@@ -686,6 +705,7 @@ class PromptService:
 
 <constraints>
 【必须遵守】
+✅ 严格遵守“项目硬设定（不可变事实）”，不得写错/混淆人名、封号官职、府邸称谓、亲缘关系、婚约对象、时间地点
 ✅ 严格按照大纲推进情节
 ✅ 自然承接上一章末尾内容，保持连贯性
 ✅ 保持角色性格、说话方式一致
@@ -697,6 +717,7 @@ class PromptService:
 ❌ 使用"总之"、"综上所述"等AI常见总结语
 ❌ 在结尾处使用开放式反问
 ❌ 添加作者注释或创作说明
+❌ 擅自修改/新增与“项目硬设定”相冲突的设定（包括但不限于：人物姓名/称谓/关系/婚约对象/势力归属）
 ❌ 重复上一章已发生的事件
 ❌ 生成字数禁止超过目标字数
 </constraints>
@@ -722,6 +743,11 @@ class PromptService:
 - 目标字数：{target_word_count}字（允许±200字浮动）
 - 叙事视角：{narrative_perspective}
 </task>
+
+<hard_settings priority="P0">
+【项目硬设定（不可变事实，必须遵守）】
+{hard_settings}
+</hard_settings>
 
 <outline priority="P0">
 【本章大纲 - 必须遵循】
@@ -775,6 +801,7 @@ class PromptService:
 
 <constraints>
 【必须遵守】
+✅ 严格遵守“项目硬设定（不可变事实）”，不得写错/混淆人名、封号官职、府邸称谓、亲缘关系、婚约对象、时间地点
 ✅ 严格按照大纲推进情节
 ✅ 自然承接上一章结尾，不重复已发生事件
 ✅ 保持角色性格、说话方式一致
@@ -795,6 +822,7 @@ class PromptService:
 ❌ 添加作者注释或创作说明
 ❌ 重复叙述上一章已发生的事件（包括环境描写、心理活动）
 ❌ 在开篇使用"接上回"、"书接上文"等套话
+❌ 擅自修改/新增与“项目硬设定”相冲突的设定（包括但不限于：人物姓名/称谓/关系/婚约对象/势力归属）
 ❌ 角色行为超出其职业阶段的能力范围
 </constraints>
 
@@ -2734,14 +2762,14 @@ class PromptService:
                 "category": "章节创作",
                 "description": "1-N模式：根据大纲创作章节内容（用于第1章，无前置章节）",
                 "parameters": ["project_title", "genre", "chapter_number", "chapter_title", "chapter_outline",
-                             "target_word_count", "narrative_perspective", "characters_info"]
+                             "hard_settings", "target_word_count", "narrative_perspective", "characters_info"]
             },
             "CHAPTER_GENERATION_ONE_TO_MANY_NEXT": {
                 "name": "章节创作-1-N模式（第2章及以后）",
                 "category": "章节创作",
                 "description": "1-N模式：基于前置章节内容创作新章节（用于第2章及以后）",
                 "parameters": ["project_title", "genre", "chapter_number", "chapter_title", "chapter_outline",
-                             "target_word_count", "narrative_perspective", "characters_info", "continuation_point",
+                             "hard_settings", "target_word_count", "narrative_perspective", "characters_info", "continuation_point",
                              "foreshadow_reminders", "relevant_memories", "story_skeleton", "previous_chapter_summary"]
             },
             "CHAPTER_GENERATION_ONE_TO_ONE": {
@@ -2749,14 +2777,14 @@ class PromptService:
                 "category": "章节创作",
                 "description": "1-1模式：章节创作（用于第1章，无前置章节）",
                 "parameters": ["project_title", "genre", "chapter_number", "chapter_title", "chapter_outline",
-                             "target_word_count", "narrative_perspective", "characters_info", "chapter_careers"]
+                             "hard_settings", "target_word_count", "narrative_perspective", "characters_info", "chapter_careers"]
             },
             "CHAPTER_GENERATION_ONE_TO_ONE_NEXT": {
                 "name": "章节创作-1-1模式（第2章及以后）",
                 "category": "章节创作",
                 "description": "1-1模式：基于上一章内容创作新章节（用于第2章及以后）",
                 "parameters": ["project_title", "genre", "chapter_number", "chapter_title", "chapter_outline",
-                             "target_word_count", "narrative_perspective", "previous_chapter_content",
+                             "hard_settings", "target_word_count", "narrative_perspective", "previous_chapter_content",
                              "characters_info", "chapter_careers", "foreshadow_reminders", "relevant_memories"]
             },
             "CHAPTER_REGENERATION_SYSTEM": {
