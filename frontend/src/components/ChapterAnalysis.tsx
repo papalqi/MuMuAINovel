@@ -1,5 +1,5 @@
-import { useState, useEffect } from 'react';
-import { Modal, Spin, Alert, Tabs, Card, Tag, List, Empty, Statistic, Row, Col, Button } from 'antd';
+import { useState, useEffect, useMemo } from 'react';
+import { Modal, Spin, Alert, Tabs, Card, Tag, List, Empty, Statistic, Row, Col, Button, message } from 'antd';
 import {
   ThunderboltOutlined,
   BulbOutlined,
@@ -31,6 +31,7 @@ export default function ChapterAnalysis({ chapterId, visible, onClose }: Chapter
   const [analysis, setAnalysis] = useState<ChapterAnalysisResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [reindexLoading, setReindexLoading] = useState(false);
   const [isMobile, setIsMobile] = useState(isMobileDevice());
   const [regenerationModalVisible, setRegenerationModalVisible] = useState(false);
   const [comparisonModalVisible, setComparisonModalVisible] = useState(false);
@@ -185,6 +186,52 @@ export default function ChapterAnalysis({ chapterId, visible, onClose }: Chapter
       setLoading(false);
     }
   };
+
+  // 仅重建“向量索引”（不重新跑大模型分析）
+  const reindexMemories = async () => {
+    try {
+      setReindexLoading(true);
+      const resp = await fetch(`/api/chapters/${chapterId}/memories/reindex`, { method: 'POST' });
+      if (!resp.ok) {
+        const errData = await resp.json().catch(() => ({}));
+        throw new Error(errData.detail || '重建索引失败');
+      }
+      const data = await resp.json();
+      message.success(`重建索引完成：added=${data.added || 0}, skipped=${data.skipped || 0}`);
+
+      // 刷新状态（含向量统计）
+      await fetchAnalysisStatus();
+    } catch (err) {
+      message.error((err as Error).message || '重建索引失败');
+    } finally {
+      setReindexLoading(false);
+    }
+  };
+
+  // 计算“记忆/索引”告警信息
+  const warnings = useMemo(() => {
+    if (!task || task.status !== 'completed') return [];
+
+    const expected = task.vector_expected_count ?? task.memory_extracted_count ?? task.memories_db_count ?? 0;
+    const added = task.vector_added_count ?? 0;
+    const skipped = task.vector_skipped_count ?? 0;
+    const memDbCount = task.memories_db_count ?? task.memory_extracted_count ?? 0;
+
+    const ws: string[] = [];
+    if (task.has_analysis_result === false) {
+      ws.push('分析结果缺失（PlotAnalysis不存在）');
+    }
+    if (memDbCount === 0) {
+      ws.push('提取记忆数量为0（StoryMemory为空）');
+    }
+    if (expected > 0 && added < expected) {
+      ws.push(`向量写入不完整：${added}/${expected}（跳过${skipped}）`);
+    }
+    if (task.vector_error_message) {
+      ws.push(String(task.vector_error_message));
+    }
+    return ws;
+  }, [task]);
 
 
   const renderStatusIcon = () => {
@@ -690,7 +737,19 @@ export default function ChapterAnalysis({ chapterId, visible, onClose }: Chapter
           >
             重新分析
           </Button>
-        )
+        ),
+        task && task.status === 'completed' && warnings.length > 0 && (
+          <Button
+            key="reindex"
+            type="primary"
+            icon={<ReloadOutlined />}
+            onClick={reindexMemories}
+            loading={reindexLoading}
+            size={isMobile ? 'small' : 'middle'}
+          >
+            重试索引
+          </Button>
+        ),
       ].filter(Boolean)}
     >
       {loading && !task && (
@@ -706,6 +765,23 @@ export default function ChapterAnalysis({ chapterId, visible, onClose }: Chapter
           description={error}
           type="error"
           showIcon
+        />
+      )}
+
+      {task && task.status === 'completed' && warnings.length > 0 && (
+        <Alert
+          message="记忆/索引异常"
+          description={
+            <div>
+              <div style={{ whiteSpace: 'pre-wrap' }}>{warnings.join('\n')}</div>
+              <div style={{ marginTop: 8, opacity: 0.8 }}>
+                你可以点击右下角“重试索引”仅重建向量（不重新跑大模型分析）。
+              </div>
+            </div>
+          }
+          type="warning"
+          showIcon
+          style={{ marginTop: 12 }}
         />
       )}
 

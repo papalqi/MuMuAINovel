@@ -210,7 +210,8 @@ async def create_outline(
             summary=db_outline.content,
             chapter_number=db_outline.order_index,
             sub_index=1,
-            outline_id=None,  # one-to-one模式不关联outline_id
+            # ✅ 传统模式(one-to-one)也建立 outline_id 关联，便于前端分组/追溯
+            outline_id=db_outline.id,
             status='pending',
             content=""
         )
@@ -1119,7 +1120,8 @@ async def _save_outlines(
                 summary=chapter_summary,
                 chapter_number=outline.order_index,
                 sub_index=1,
-                outline_id=None,  # one-to-one模式不关联outline_id
+                # ✅ 传统模式(one-to-one)也建立 outline_id 关联，便于前端分组/追溯
+                outline_id=outline.id,
                 status='pending',
                 content=""
             )
@@ -2424,7 +2426,8 @@ async def create_single_chapter_from_outline(
             summary=outline.content,  # 使用大纲内容作为摘要
             chapter_number=outline.order_index,
             sub_index=1,  # 一对一模式固定为1
-            outline_id=None,  # 传统模式不关联outline_id
+            # ✅ 传统模式(one-to-one)也建立 outline_id 关联，便于前端分组/追溯
+            outline_id=outline_id,
             status='pending'
         )
         

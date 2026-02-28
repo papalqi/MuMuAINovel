@@ -21,6 +21,11 @@ from app.services.plot_expansion_service import PlotExpansionService
 from app.logger import get_logger
 from app.utils.sse_response import SSEResponse, create_sse_response, WizardProgressTracker
 from app.api.settings import get_user_ai_service_for_task
+from app.utils.organization_sanitize import (
+    normalize_member_status,
+    normalize_optional_short_text,
+    normalize_required_short_text,
+)
 
 router = APIRouter(prefix="/wizard-stream", tags=["项目创建向导(流式)"])
 logger = get_logger(__name__)
@@ -1204,11 +1209,21 @@ async def characters_generator(
                             member = OrganizationMember(
                                 organization_id=org.id,
                                 character_id=character.id,
-                                position=membership.get("position", "成员"),
+                                position=normalize_required_short_text(
+                                    membership.get("position"),
+                                    max_len=100,
+                                    default="成员",
+                                ),
                                 rank=membership.get("rank", 0),
                                 loyalty=membership.get("loyalty", 50),
-                                joined_at=membership.get("joined_at"),
-                                status=membership.get("status", "active"),
+                                joined_at=normalize_optional_short_text(
+                                    membership.get("joined_at"),
+                                    max_len=100,
+                                ),
+                                status=normalize_member_status(
+                                    membership.get("status"),
+                                    default="active",
+                                ),
                                 source="ai"
                             )
                             db.add(member)
@@ -1547,7 +1562,8 @@ async def outline_generator(
                     project_id=project_id,
                     title=outline.title,
                     content="",  # 空内容，等待用户生成
-                    outline_id=None,  # 一对一模式下不关联outline_id
+                    # ✅ 传统模式(one-to-one)也建立 outline_id 关联，便于前端分组/追溯
+                    outline_id=outline.id,
                     chapter_number=outline.order_index,  # 使用chapter_number而不是order_index
                     status="pending"
                 )

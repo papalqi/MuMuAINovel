@@ -26,6 +26,11 @@ from app.schemas.import_export import CharactersExportRequest, CharactersImportR
 from app.logger import get_logger
 from app.api.settings import get_user_ai_service_for_task
 from app.api.common import verify_project_access
+from app.utils.organization_sanitize import (
+    normalize_member_status,
+    normalize_optional_short_text,
+    normalize_required_short_text,
+)
 
 router = APIRouter(prefix="/characters", tags=["角色管理"])
 logger = get_logger(__name__)
@@ -1300,11 +1305,21 @@ async def generate_character_stream(
                                 member = OrganizationMember(
                                     organization_id=org.id,
                                     character_id=character.id,
-                                    position=membership.get("position", "成员"),
+                                    position=normalize_required_short_text(
+                                        membership.get("position"),
+                                        max_len=100,
+                                        default="成员",
+                                    ),
                                     rank=membership.get("rank", 0),
                                     loyalty=membership.get("loyalty", 50),
-                                    joined_at=membership.get("joined_at"),
-                                    status=membership.get("status", "active"),
+                                    joined_at=normalize_optional_short_text(
+                                        membership.get("joined_at"),
+                                        max_len=100,
+                                    ),
+                                    status=normalize_member_status(
+                                        membership.get("status"),
+                                        default="active",
+                                    ),
                                     source="ai"
                                 )
                                 db.add(member)

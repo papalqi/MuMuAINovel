@@ -63,6 +63,8 @@ services:
     volumes:
       - ./logs:/app/logs
       - ./.env:/app/.env:ro
+      # ChromaDB 向量库持久化（避免容器重建导致索引丢失）
+      - ./data/chroma_db:/app/data/chroma_db
     environment:
       # 应用配置
       - APP_NAME=${APP_NAME:-MuMuAINovel}
@@ -136,4 +138,3 @@ volumes:
 networks:
   ai-story-network:
     driver: bridge
-

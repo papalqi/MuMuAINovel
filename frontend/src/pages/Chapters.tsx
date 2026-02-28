@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { List, Button, Modal, Form, Input, Select, message, Empty, Space, Badge, Tag, Card, InputNumber, Alert, Radio, Descriptions, Collapse, Popconfirm, FloatButton } from 'antd';
-import { EditOutlined, FileTextOutlined, ThunderboltOutlined, LockOutlined, DownloadOutlined, SettingOutlined, FundOutlined, SyncOutlined, CheckCircleOutlined, CloseCircleOutlined, RocketOutlined, StopOutlined, InfoCircleOutlined, CaretRightOutlined, DeleteOutlined, BookOutlined, FormOutlined, PlusOutlined, ReadOutlined } from '@ant-design/icons';
+import { EditOutlined, FileTextOutlined, ThunderboltOutlined, LockOutlined, DownloadOutlined, SettingOutlined, FundOutlined, SyncOutlined, CheckCircleOutlined, CloseCircleOutlined, RocketOutlined, StopOutlined, InfoCircleOutlined, CaretRightOutlined, DeleteOutlined, BookOutlined, FormOutlined, PlusOutlined, ReadOutlined, ExclamationCircleOutlined } from '@ant-design/icons';
 import { useStore } from '../store';
 import { useTaskCenterStore } from '../store/taskCenter';
 import { useChapterSync } from '../store/hooks';
@@ -1520,11 +1520,45 @@ export default function Chapters() {
         );
       }
       case 'completed':
-        return (
-          <Tag icon={<CheckCircleOutlined />} color="success">
-            已分析
-          </Tag>
-        );
+        {
+          const expected = task.vector_expected_count ?? task.memory_extracted_count ?? task.memories_db_count ?? 0;
+          const added = task.vector_added_count ?? 0;
+          const skipped = task.vector_skipped_count ?? 0;
+          const memDbCount = task.memories_db_count ?? task.memory_extracted_count ?? 0;
+
+          const warnReasons: string[] = [];
+          if (task.has_analysis_result === false) {
+            warnReasons.push('分析结果缺失（PlotAnalysis不存在）');
+          }
+          if (memDbCount === 0) {
+            warnReasons.push('提取记忆数量为0（StoryMemory为空）');
+          }
+          if (expected > 0 && added < expected) {
+            warnReasons.push(`向量写入不完整：${added}/${expected}（跳过${skipped}）`);
+          }
+          if (task.vector_error_message) {
+            warnReasons.push(String(task.vector_error_message));
+          }
+
+          const hasWarn = warnReasons.length > 0;
+
+          return (
+            <>
+              <Tag icon={<CheckCircleOutlined />} color="success">
+                已分析
+              </Tag>
+              {hasWarn && (
+                <Tag
+                  icon={<ExclamationCircleOutlined />}
+                  color="warning"
+                  title={warnReasons.join('\n')}
+                >
+                  记忆/索引异常
+                </Tag>
+              )}
+            </>
+          );
+        }
       case 'failed':
         return (
           <Tag icon={<CloseCircleOutlined />} color="error" title={task.error_message || undefined}>

@@ -10,6 +10,7 @@ import os
 import hashlib
 import httpx
 from urllib.parse import urljoin
+import random
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -477,7 +478,8 @@ class MemoryService:
         model: str,
         texts: List[str],
         timeout_s: int = 60,
-        batch_size: int = 64,
+        batch_size: int = 32,
+        max_retries: int = 3,
     ) -> List[List[float]]:
         if not api_base_url or not model:
             raise ValueError("远端Embedding配置不完整：api_base_url / model 不能为空")
@@ -495,25 +497,223 @@ class MemoryService:
                 chunk = texts[i:i + batch_size]
                 # 部分 OpenAI-兼容服务（例如 ModelScope）要求显式传入 encoding_format
                 payload = {"model": model, "input": chunk, "encoding_format": "float"}
-                resp = await client.post(url, headers=headers, json=payload)
-                resp.raise_for_status()
-                data = resp.json()
-                items = data.get("data") or []
-                # OpenAI 格式：data=[{index, embedding, ...}]
-                try:
-                    items = sorted(items, key=lambda x: int(x.get("index", 0)))
-                except Exception:
-                    pass
-                for item in items:
-                    emb = item.get("embedding")
-                    if not isinstance(emb, list):
-                        raise RuntimeError("远端Embedding返回格式异常：embedding 不是 list")
-                    embeddings.append(emb)
+
+                last_error: Optional[Exception] = None
+                for attempt in range(max_retries):
+                    try:
+                        resp = await client.post(url, headers=headers, json=payload)
+
+                        # 429：限流，做指数退避 + 抖动
+                        if resp.status_code == 429:
+                            wait_s = min(30.0, (2 ** attempt) + random.random())
+                            logger.warning(f"⚠️ 远端Embedding被限流(429)，等待{wait_s:.1f}s后重试 (attempt={attempt+1}/{max_retries})")
+                            await asyncio.sleep(wait_s)
+                            continue
+
+                        resp.raise_for_status()
+                        data = resp.json()
+                        items = data.get("data") or []
+                        if len(items) != len(chunk):
+                            raise RuntimeError(
+                                f"远端Embedding返回数量不匹配(chunk)：期望{len(chunk)}，实际{len(items)}"
+                            )
+
+                        # OpenAI 格式：data=[{index, embedding, ...}]
+                        try:
+                            items = sorted(items, key=lambda x: int(x.get("index", 0)))
+                        except Exception:
+                            pass
+
+                        for item in items:
+                            emb = item.get("embedding")
+                            if not isinstance(emb, list):
+                                raise RuntimeError("远端Embedding返回格式异常：embedding 不是 list")
+                            embeddings.append(emb)
+                        last_error = None
+                        break
+
+                    except (httpx.TimeoutException, httpx.ConnectError, httpx.RemoteProtocolError) as e:
+                        last_error = e
+                        wait_s = min(30.0, (2 ** attempt) + random.random())
+                        logger.warning(f"⚠️ 远端Embedding请求异常，等待{wait_s:.1f}s后重试: {e} (attempt={attempt+1}/{max_retries})")
+                        await asyncio.sleep(wait_s)
+                    except httpx.HTTPStatusError as e:
+                        last_error = e
+                        # 记录 body 便于排查（截断，避免过长/泄露）
+                        body = ""
+                        try:
+                            body = (e.response.text or "")[:500]
+                        except Exception:
+                            body = ""
+                        logger.error(f"❌ 远端Embedding HTTP错误: {e} body={body}")
+                        raise
+                    except Exception as e:
+                        last_error = e
+                        logger.error(f"❌ 远端Embedding解析失败: {e}")
+                        raise
+
+                if last_error is not None:
+                    raise RuntimeError(f"远端Embedding重试失败: {last_error}")
 
         if len(embeddings) != len(texts):
             raise RuntimeError(f"远端Embedding返回数量不匹配：期望{len(texts)}，实际{len(embeddings)}")
 
         return embeddings
+
+    async def _embed_texts_remote_openai_compatible_partial(
+        self,
+        *,
+        api_base_url: str,
+        api_key: str,
+        model: str,
+        texts: List[str],
+        timeout_s: int = 60,
+        batch_size: int = 32,
+        max_retries: int = 3,
+    ) -> Dict[str, Any]:
+        """
+        远端 embedding（OpenAI 兼容）- “部分成功”版本：
+        - 单条文本被拦截/失败，不影响整批；
+        - 发生 400/数量不匹配/限流时，自动二分拆批直到定位到单条，再跳过；
+
+        返回：
+        - embeddings: List[List[float]]  （仅成功的向量，顺序对应 success_indices）
+        - success_indices: List[int]
+        - skipped_indices: List[int]
+        - errors: List[{index, status, message}]
+        """
+        if not texts:
+            return {"embeddings": [], "success_indices": [], "skipped_indices": [], "errors": []}
+
+        if not api_base_url or not model:
+            raise ValueError("远端Embedding配置不完整：api_base_url / model 不能为空")
+
+        url = self._build_openai_compatible_url(api_base_url, "embeddings")
+
+        headers: Dict[str, str] = {"Content-Type": "application/json"}
+        if api_key:
+            headers["Authorization"] = f"Bearer {api_key}"
+
+        results: List[Optional[List[float]]] = [None] * len(texts)
+        errors: List[Dict[str, Any]] = []
+
+        async with httpx.AsyncClient(timeout=timeout_s) as client:
+
+            async def _post_and_parse(chunk_texts: List[str]) -> List[List[float]]:
+                payload = {"model": model, "input": chunk_texts, "encoding_format": "float"}
+
+                last_error: Optional[Exception] = None
+                for attempt in range(max_retries):
+                    try:
+                        resp = await client.post(url, headers=headers, json=payload)
+                        if resp.status_code == 429:
+                            wait_s = min(30.0, (2 ** attempt) + random.random())
+                            logger.warning(f"⚠️ 远端Embedding被限流(429)，等待{wait_s:.1f}s后重试 (attempt={attempt+1}/{max_retries})")
+                            await asyncio.sleep(wait_s)
+                            continue
+
+                        resp.raise_for_status()
+                        data = resp.json()
+                        items = data.get("data") or []
+                        if len(items) != len(chunk_texts):
+                            raise RuntimeError(f"远端Embedding返回数量不匹配(chunk)：期望{len(chunk_texts)}，实际{len(items)}")
+
+                        try:
+                            items = sorted(items, key=lambda x: int(x.get("index", 0)))
+                        except Exception:
+                            pass
+
+                        chunk_embeddings: List[List[float]] = []
+                        for item in items:
+                            emb = item.get("embedding")
+                            if not isinstance(emb, list):
+                                raise RuntimeError("远端Embedding返回格式异常：embedding 不是 list")
+                            chunk_embeddings.append(emb)
+                        last_error = None
+                        return chunk_embeddings
+
+                    except (httpx.TimeoutException, httpx.ConnectError, httpx.RemoteProtocolError) as e:
+                        last_error = e
+                        wait_s = min(30.0, (2 ** attempt) + random.random())
+                        logger.warning(f"⚠️ 远端Embedding请求异常，等待{wait_s:.1f}s后重试: {e} (attempt={attempt+1}/{max_retries})")
+                        await asyncio.sleep(wait_s)
+                    except httpx.HTTPStatusError as e:
+                        last_error = e
+                        raise
+                    except Exception as e:
+                        last_error = e
+                        raise
+
+                raise RuntimeError(f"远端Embedding重试失败: {last_error}")
+
+            async def _embed_indices(indices: List[int]) -> None:
+                if not indices:
+                    return
+                chunk_texts = [texts[idx] for idx in indices]
+
+                # 空文本直接跳过
+                if len(indices) == 1 and (chunk_texts[0] is None or str(chunk_texts[0]).strip() == ""):
+                    errors.append({"index": indices[0], "status": None, "message": "empty text"})
+                    return
+
+                try:
+                    chunk_embeddings = await _post_and_parse(chunk_texts)
+                    for j, emb in enumerate(chunk_embeddings):
+                        results[indices[j]] = emb
+                    return
+
+                except httpx.HTTPStatusError as e:
+                    status = getattr(e.response, "status_code", None)
+                    body = ""
+                    try:
+                        body = (e.response.text or "")[:500]
+                    except Exception:
+                        body = ""
+
+                    # 400/413/414：通常是“某一条输入导致整批失败/超限/拦截”，二分拆批定位到单条
+                    if len(indices) > 1 and status in (400, 413, 414):
+                        mid = len(indices) // 2
+                        await _embed_indices(indices[:mid])
+                        await _embed_indices(indices[mid:])
+                        return
+
+                    # 其它 HTTP 错误：认为是“整批不可用”（如 401/403/5xx），不做无意义拆分
+                    if len(indices) > 1:
+                        errors.append({"index": None, "status": status, "message": body or str(e)})
+                        logger.warning(f"⚠️ 远端Embedding整批失败，跳过该批次: size={len(indices)} status={status} body={body}")
+                        return
+
+                    # 单条仍失败：记录并跳过
+                    errors.append({"index": indices[0], "status": status, "message": body or str(e)})
+                    logger.warning(f"⚠️ 跳过1条被远端Embedding拦截/失败的文本 index={indices[0]} status={status} body={body}")
+                    return
+
+                except Exception as e:
+                    # 数量不匹配/200但data为空等：拆分
+                    if len(indices) > 1:
+                        mid = len(indices) // 2
+                        await _embed_indices(indices[:mid])
+                        await _embed_indices(indices[mid:])
+                        return
+
+                    errors.append({"index": indices[0], "status": None, "message": str(e)[:500]})
+                    logger.warning(f"⚠️ 跳过1条远端Embedding异常文本 index={indices[0]} err={e}")
+
+            # 先按 batch_size 分块；每块内部如遇问题再二分
+            for start in range(0, len(texts), batch_size):
+                idxs = list(range(start, min(start + batch_size, len(texts))))
+                await _embed_indices(idxs)
+
+        success_indices = [i for i, emb in enumerate(results) if isinstance(emb, list)]
+        skipped_indices = [i for i, emb in enumerate(results) if emb is None]
+        embeddings = [results[i] for i in success_indices]  # type: ignore[list-item]
+
+        return {
+            "embeddings": embeddings,
+            "success_indices": success_indices,
+            "skipped_indices": skipped_indices,
+            "errors": errors,
+        }
 
     async def _rerank_remote_cohere_compatible(
         self,
@@ -627,7 +827,8 @@ class MemoryService:
                 )
             
             # 存储到向量库
-            collection.add(
+            # upsert：避免重复ID导致失败（支持重建索引/重复写入）
+            collection.upsert(
                 ids=[memory_id],
                 embeddings=[embedding],
                 documents=[content],
@@ -647,7 +848,7 @@ class MemoryService:
         project_id: str,
         memories: List[Dict[str, Any]],
         db: Optional[AsyncSession] = None,
-    ) -> int:
+    ) -> Dict[str, Any]:
         """
         批量添加记忆(性能更好)
         
@@ -657,10 +858,24 @@ class MemoryService:
             memories: 记忆列表,每个包含id、content、type、metadata
         
         Returns:
-            成功添加的数量
+            写入统计信息（支持部分成功）：
+            - requested: 请求数量
+            - added: 成功写入向量数量
+            - skipped: 跳过数量（拦截/失败/空文本）
+            - errors: 详细错误（可选，长度受限）
+            - backend/embed_id/collection: 便于定位 collection
         """
         if not memories:
-            return 0
+            return {
+                "requested": 0,
+                "added": 0,
+                "skipped": 0,
+                "errors": [],
+                "backend": None,
+                "embed_id": None,
+                "collection": None,
+                "error_message": None,
+            }
             
         try:
             settings, retrieval = await self._get_user_settings_and_retrieval(user_id, db)
@@ -690,23 +905,97 @@ class MemoryService:
                 }
                 metadatas.append(chroma_metadata)
 
+            requested = len(memories)
+
             # 批量生成 embedding（本地或远端）
-            embeddings = await self._embed_texts(documents, embed_backend)
-            
-            # 批量添加
-            collection.add(
-                ids=ids,
-                embeddings=embeddings,
-                documents=documents,
-                metadatas=metadatas
-            )
-            
-            logger.info(f"✅ 批量添加记忆成功: {len(memories)}条")
-            return len(memories)
+            errors: List[Dict[str, Any]] = []
+            added = 0
+            skipped = 0
+
+            if (embed_backend.get("backend") or "local") == "remote":
+                embed_res = await self._embed_texts_remote_openai_compatible_partial(
+                    api_base_url=str(embed_backend.get("api_base_url") or ""),
+                    api_key=str(embed_backend.get("api_key") or ""),
+                    model=str(embed_backend.get("model") or ""),
+                    texts=documents,
+                    timeout_s=int(embed_backend.get("timeout_s") or 60),
+                    batch_size=32,
+                    max_retries=3,
+                )
+                success_indices: List[int] = embed_res.get("success_indices") or []
+                skipped_indices: List[int] = embed_res.get("skipped_indices") or []
+                errors = embed_res.get("errors") or []
+
+                if success_indices:
+                    ids_ok = [ids[i] for i in success_indices]
+                    docs_ok = [documents[i] for i in success_indices]
+                    metas_ok = [metadatas[i] for i in success_indices]
+                    embs_ok = embed_res.get("embeddings") or []
+
+                    # upsert：避免重复ID导致整批失败（支持“重新分析/重建索引”场景）
+                    collection.upsert(
+                        ids=ids_ok,
+                        embeddings=embs_ok,
+                        documents=docs_ok,
+                        metadatas=metas_ok,
+                    )
+                    added = len(ids_ok)
+
+                skipped = max(0, requested - added)
+
+                if skipped > 0:
+                    logger.warning(f"⚠️ 批量写入向量部分跳过: requested={requested}, added={added}, skipped={skipped}")
+                else:
+                    logger.info(f"✅ 批量添加记忆成功(远端Embedding): {added}条")
+
+            else:
+                # local：严格模式，一旦失败直接抛错
+                embeddings = await self._embed_texts(documents, embed_backend)
+
+                collection.upsert(
+                    ids=ids,
+                    embeddings=embeddings,
+                    documents=documents,
+                    metadatas=metadatas,
+                )
+                added = requested
+                skipped = 0
+                logger.info(f"✅ 批量添加记忆成功: {added}条")
+
+            # 汇总错误信息（截断，避免过长）
+            error_message = None
+            if errors:
+                parts = []
+                for e in errors[:5]:
+                    idx = e.get("index")
+                    st = e.get("status")
+                    msg = str(e.get("message") or "")[:120]
+                    parts.append(f"#{idx}(status={st}):{msg}")
+                error_message = f"{len(errors)} errors; " + " | ".join(parts)
+
+            return {
+                "requested": requested,
+                "added": added,
+                "skipped": skipped,
+                "errors": errors[:50],  # 仅返回前50条，避免响应过大
+                "backend": embed_backend.get("backend"),
+                "embed_id": embed_backend.get("embed_id"),
+                "collection": getattr(collection, "name", None),
+                "error_message": error_message,
+            }
             
         except Exception as e:
             logger.error(f"❌ 批量添加记忆失败: {str(e)}")
-            return 0
+            return {
+                "requested": len(memories),
+                "added": 0,
+                "skipped": len(memories),
+                "errors": [{"index": None, "status": None, "message": str(e)[:500]}],
+                "backend": None,
+                "embed_id": None,
+                "collection": None,
+                "error_message": str(e)[:500],
+            }
     
     async def search_memories(
         self,

@@ -5,7 +5,7 @@ from sqlalchemy import select, func
 from sqlalchemy.orm import selectinload
 import json
 import asyncio
-from typing import Optional
+from typing import Optional, List, Dict, Any
 from datetime import datetime
 from asyncio import Queue, Lock
 
@@ -1075,6 +1075,20 @@ async def analyze_chapter_background(
             chapter_content=chapter.content or "",
             chapter_title=chapter.title or ""
         )
+
+        # 记录本次分析提取的记忆数量（用于前端标记“提取记忆异常”）
+        try:
+            async with write_lock:
+                task.memory_extracted_count = int(len(memories or []))
+                task.vector_expected_count = int(len(memories or []))
+                task.vector_added_count = 0
+                task.vector_skipped_count = 0
+                task.vector_error_message = None
+                task.vector_embed_id = None
+                task.vector_collection = None
+                await db_session.commit()
+        except Exception as e:
+            logger.warning(f"⚠️ 记录记忆数量到分析任务失败（不影响分析继续）: {e}")
         
         # 先删除该章节的旧记忆（写操作，需要锁）
         async with write_lock:
@@ -1089,8 +1103,8 @@ async def analyze_chapter_background(
         
         # 准备批量添加的记忆数据（不需要锁）
         memory_records = []
-        for mem in memories:
-            memory_id = f"{chapter_id}_{mem['type']}_{len(memory_records)}"
+        for idx, mem in enumerate(memories or []):
+            memory_id = f"{chapter_id}_{mem['type']}_{idx}"
             memory_records.append({
                 'id': memory_id,
                 'content': mem['content'],
@@ -1100,8 +1114,8 @@ async def analyze_chapter_background(
             
         # 保存到关系数据库（写操作，需要锁）
         async with write_lock:
-            for mem in memories:
-                memory_id = memory_records[memories.index(mem)]['id']
+            for idx, mem in enumerate(memories or []):
+                memory_id = memory_records[idx]['id']
                 text_position = mem['metadata'].get('text_position', -1)
                 text_length = mem['metadata'].get('text_length', 0)
                 
@@ -1130,13 +1144,29 @@ async def analyze_chapter_background(
         
         # 批量添加到向量数据库
         if memory_records:
-            added_count = await memory_service.batch_add_memories(
+            vector_res = await memory_service.batch_add_memories(
                 user_id=user_id,
                 project_id=project_id,
                 memories=memory_records,
                 db=db_session,
             )
-            logger.info(f"✅ 添加{added_count}条记忆到向量库")
+            try:
+                async with write_lock:
+                    task.vector_expected_count = int(vector_res.get("requested") or len(memory_records))
+                    task.vector_added_count = int(vector_res.get("added") or 0)
+                    task.vector_skipped_count = int(vector_res.get("skipped") or 0)
+                    task.vector_error_message = vector_res.get("error_message")
+                    task.vector_embed_id = vector_res.get("embed_id")
+                    task.vector_collection = vector_res.get("collection")
+                    await db_session.commit()
+            except Exception as e:
+                logger.warning(f"⚠️ 写入向量统计到分析任务失败（不影响分析继续）: {e}")
+
+            logger.info(
+                f"✅ 向量写入结果: requested={vector_res.get('requested')}, added={vector_res.get('added')}, skipped={vector_res.get('skipped')}"
+            )
+            if vector_res.get("error_message"):
+                logger.warning(f"⚠️ 向量写入警告: {vector_res.get('error_message')}")
         
         # 💼 更新角色职业（根据分析结果）
         if analysis_result.get('character_states'):
@@ -1920,7 +1950,18 @@ async def get_analysis_task_status(
             "task_id": None,
             "created_at": None,
             "started_at": None,
-            "completed_at": None
+            "completed_at": None,
+
+            # 记忆/向量统计（无任务时为空）
+            "memory_extracted_count": 0,
+            "vector_expected_count": 0,
+            "vector_added_count": 0,
+            "vector_skipped_count": 0,
+            "vector_error_message": None,
+            "vector_embed_id": None,
+            "vector_collection": None,
+            "has_analysis_result": False,
+            "memories_db_count": 0,
         }
     
     auto_recovered = False
@@ -1958,6 +1999,25 @@ async def get_analysis_task_status(
             await db.refresh(task)
             logger.warning(f"🔄 自动恢复未启动的任务: {task.id}, 章节: {chapter_id}")
     
+    # 补充：分析结果/记忆数量（用于前端标记异常）
+    has_analysis_result = False
+    memories_db_count = 0
+    if task.status == "completed":
+        try:
+            analysis_exists = await db.execute(
+                select(PlotAnalysis.id).where(PlotAnalysis.chapter_id == chapter_id).limit(1)
+            )
+            has_analysis_result = bool(analysis_exists.scalar_one_or_none())
+
+            from sqlalchemy import func
+
+            mem_count_result = await db.execute(
+                select(func.count()).select_from(StoryMemory).where(StoryMemory.chapter_id == chapter_id)
+            )
+            memories_db_count = int(mem_count_result.scalar() or 0)
+        except Exception as e:
+            logger.warning(f"⚠️ 获取章节分析/记忆数量失败（不影响状态返回）: {e}")
+
     return {
         "has_task": True,
         "task_id": task.id,
@@ -1968,7 +2028,18 @@ async def get_analysis_task_status(
         "auto_recovered": auto_recovered,
         "created_at": task.created_at.isoformat() if task.created_at else None,
         "started_at": task.started_at.isoformat() if task.started_at else None,
-        "completed_at": task.completed_at.isoformat() if task.completed_at else None
+        "completed_at": task.completed_at.isoformat() if task.completed_at else None,
+
+        # 记忆/向量统计
+        "memory_extracted_count": int(getattr(task, "memory_extracted_count", 0) or 0),
+        "vector_expected_count": int(getattr(task, "vector_expected_count", 0) or 0),
+        "vector_added_count": int(getattr(task, "vector_added_count", 0) or 0),
+        "vector_skipped_count": int(getattr(task, "vector_skipped_count", 0) or 0),
+        "vector_error_message": getattr(task, "vector_error_message", None),
+        "vector_embed_id": getattr(task, "vector_embed_id", None),
+        "vector_collection": getattr(task, "vector_collection", None),
+        "has_analysis_result": has_analysis_result,
+        "memories_db_count": memories_db_count,
     }
 
 
@@ -2256,6 +2327,109 @@ async def trigger_chapter_analysis(
         "chapter_id": chapter_id,
         "status": "pending",
         "message": "分析任务已创建并开始执行"
+    }
+
+
+@router.post("/{chapter_id}/memories/reindex", summary="重建章节记忆向量索引")
+async def reindex_chapter_memories(
+    chapter_id: str,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    从关系库 story_memories 重建该章节在 ChromaDB 中的向量索引。
+
+    用途：
+    - 远端 embedding 被拦截/限流导致写入失败或部分失败
+    - 切换 embedding 配置后需要重新写入向量
+    """
+    user_id = getattr(request.state, "user_id", None)
+    if not user_id:
+        raise HTTPException(status_code=401, detail="未登录")
+
+    chapter_result = await db.execute(select(Chapter).where(Chapter.id == chapter_id))
+    chapter = chapter_result.scalar_one_or_none()
+    if not chapter:
+        raise HTTPException(status_code=404, detail="章节不存在")
+
+    await verify_project_access(chapter.project_id, user_id, db)
+
+    memories_result = await db.execute(select(StoryMemory).where(StoryMemory.chapter_id == chapter_id))
+    memories = memories_result.scalars().all()
+
+    if not memories:
+        return {
+            "success": True,
+            "chapter_id": chapter_id,
+            "requested": 0,
+            "added": 0,
+            "skipped": 0,
+            "errors": [],
+            "message": "该章节暂无记忆，无需重建索引",
+        }
+
+    # 先清理该章节旧向量（跨 collection）
+    try:
+        await memory_service.delete_chapter_memories(
+            user_id=user_id,
+            project_id=chapter.project_id,
+            chapter_id=chapter_id,
+        )
+    except Exception as e:
+        logger.warning(f"⚠️ 重建索引前清理旧向量失败（继续重建）: {e}")
+
+    memory_records: List[Dict[str, Any]] = []
+    for mem in memories:
+        memory_records.append(
+            {
+                "id": mem.id,
+                "content": mem.content,
+                "type": mem.memory_type,
+                "metadata": {
+                    "chapter_id": chapter_id,
+                    "chapter_number": chapter.chapter_number,
+                    "importance_score": mem.importance_score or 0.5,
+                    "tags": mem.tags or [],
+                    "title": mem.title or "",
+                    "is_foreshadow": mem.is_foreshadow or 0,
+                    "related_characters": mem.related_characters or [],
+                    "related_locations": mem.related_locations or [],
+                },
+            }
+        )
+
+    vector_res = await memory_service.batch_add_memories(
+        user_id=user_id,
+        project_id=chapter.project_id,
+        memories=memory_records,
+        db=db,
+    )
+
+    # 同步更新该章节最新分析任务的向量写入状态（若存在）
+    try:
+        task_result = await db.execute(
+            select(AnalysisTask)
+            .where(AnalysisTask.chapter_id == chapter_id)
+            .order_by(AnalysisTask.created_at.desc())
+            .limit(1)
+        )
+        task = task_result.scalar_one_or_none()
+        if task:
+            task.vector_expected_count = int(vector_res.get("requested") or len(memory_records))
+            task.vector_added_count = int(vector_res.get("added") or 0)
+            task.vector_skipped_count = int(vector_res.get("skipped") or 0)
+            task.vector_error_message = vector_res.get("error_message")
+            task.vector_embed_id = vector_res.get("embed_id")
+            task.vector_collection = vector_res.get("collection")
+            await db.commit()
+    except Exception as e:
+        logger.warning(f"⚠️ 重建索引后更新分析任务统计失败（不影响接口返回）: {e}")
+
+    return {
+        "success": True,
+        "chapter_id": chapter_id,
+        **vector_res,
+        "message": "重建索引完成",
     }
 
 

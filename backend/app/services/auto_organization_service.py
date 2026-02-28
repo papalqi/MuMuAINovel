@@ -10,6 +10,11 @@ from app.models.project import Project
 from app.services.ai_service import AIService
 from app.services.prompt_service import PromptService
 from app.logger import get_logger
+from app.utils.organization_sanitize import (
+    normalize_member_status,
+    normalize_optional_short_text,
+    normalize_required_short_text,
+)
 
 logger = get_logger(__name__)
 
@@ -199,11 +204,15 @@ class AutoOrganizationService:
                 member = OrganizationMember(
                     organization_id=organization.id,
                     character_id=target_char.id,
-                    position=member_spec.get("position", "成员"),
+                    position=normalize_required_short_text(
+                        member_spec.get("position"),
+                        max_len=100,
+                        default="成员",
+                    ),
                     rank=member_spec.get("rank", 0),
                     loyalty=member_spec.get("loyalty", 50),
-                    status=member_spec.get("status", "active"),
-                    joined_at=member_spec.get("joined_at"),
+                    status=normalize_member_status(member_spec.get("status"), default="active"),
+                    joined_at=normalize_optional_short_text(member_spec.get("joined_at"), max_len=100),
                     source="auto"  # 标记为自动生成
                 )
                 

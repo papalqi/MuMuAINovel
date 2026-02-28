@@ -619,6 +619,17 @@ export interface AnalysisTask {
   created_at?: string | null;
   started_at?: string | null;
   completed_at?: string | null;
+
+  // ✅ 记忆/向量索引子状态（用于“分析完成但记忆/索引异常”的前端标记）
+  memory_extracted_count?: number;
+  vector_expected_count?: number;
+  vector_added_count?: number;
+  vector_skipped_count?: number;
+  vector_error_message?: string | null;
+  vector_embed_id?: string | null;
+  vector_collection?: string | null;
+  has_analysis_result?: boolean;
+  memories_db_count?: number;
 }
 
 // 分析结果 - 钩子
