@@ -1707,7 +1707,9 @@ async def generate_chapter_content_stream(
                 #   之前使用 3 倍系数会让模型严重超写，导致项目总字数失控。
                 # - 这里改为更保守的系数，用 max_tokens 作为“硬上限”，让模型必须在
                 #   接近 target_word_count 处收束。
-                calculated_max_tokens = int(target_word_count * 1.4)
+                # NOTE: max_tokens 是硬上限，过小会导致正文在句子中间被截断。
+                # 这里使用较保守但能显著降低“写到一半被截断”的系数。
+                calculated_max_tokens = int(target_word_count * 2.0)
                 calculated_max_tokens = max(800, min(calculated_max_tokens, 12000))  # 限制在 800-12000 之间
                 logger.info(f"📊 目标字数: {target_word_count}, max_tokens(硬上限): {calculated_max_tokens}")
                 
@@ -3192,7 +3194,8 @@ async def generate_single_chapter_for_batch(
     
     # 🔢 计算 max_tokens 限制（批量生成）
     # 参见流式生成处的说明：使用更保守的系数，避免章节严重超写。
-    calculated_max_tokens = int(target_word_count * 1.4)
+    # NOTE: 批量生成同样需要足够的 max_tokens，否则容易出现“章节末尾被截断”。
+    calculated_max_tokens = int(target_word_count * 2.0)
     calculated_max_tokens = max(800, min(calculated_max_tokens, 12000))  # 限制在 800-12000 之间
     logger.info(f"📊 批量生成 - 目标字数: {target_word_count}, max_tokens(硬上限): {calculated_max_tokens}")
     
