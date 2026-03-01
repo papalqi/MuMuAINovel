@@ -110,6 +110,9 @@ export default function Login() {
       onFinish={handleLocalLogin}
       size="large"
       style={{ marginTop: '24px' }}
+      // Ant Design Form 默认可能会关闭自动完成，导致 Chrome 不提示保存密码/不自动填充
+      // 这里显式开启，配合 input 的 autocomplete="username/current-password"
+      autoComplete="on"
     >
       <Form.Item
         name="username"
@@ -119,6 +122,7 @@ export default function Login() {
           prefix={<UserOutlined style={{ color: '#999' }} />}
           placeholder="用户名"
           autoComplete="username"
+          name="username"
         />
       </Form.Item>
       <Form.Item
@@ -129,6 +133,7 @@ export default function Login() {
           prefix={<LockOutlined style={{ color: '#999' }} />}
           placeholder="密码"
           autoComplete="current-password"
+          name="password"
         />
       </Form.Item>
       <Form.Item style={{ marginBottom: 0 }}>
