@@ -92,6 +92,8 @@ export default function Chapters() {
   // 单章节生成进度状态
   const [singleChapterProgress, setSingleChapterProgress] = useState(0);
   const [singleChapterProgressMessage, setSingleChapterProgressMessage] = useState('');
+  const [singleChapterProgressVisible, setSingleChapterProgressVisible] = useState(true);
+  const singleChapterAbortRef = useRef<AbortController | null>(null);
 
   // 批量生成相关状态
   const [batchGenerateVisible, setBatchGenerateVisible] = useState(false);
@@ -108,6 +110,7 @@ export default function Chapters() {
   } | null>(null);
   const batchPollingIntervalRef = useRef<number | null>(null);
   const [batchUiTaskId, setBatchUiTaskId] = useState<string | null>(null);
+  const [batchProgressModalVisible, setBatchProgressModalVisible] = useState(true);
   const createTask = useTaskCenterStore((state) => state.createTask);
   const setTaskProgress = useTaskCenterStore((state) => state.setTaskProgress);
   const markTaskSuccess = useTaskCenterStore((state) => state.markTaskSuccess);
@@ -517,6 +520,7 @@ export default function Chapters() {
           completed: task.completed,
           current_chapter_number: task.current_chapter_number,
         });
+        setBatchProgressModalVisible(true);
         setBatchGenerating(true);
         setBatchGenerateVisible(true);
 
@@ -761,6 +765,15 @@ export default function Chapters() {
     }
   };
 
+  const isAbortError = (error: unknown) => {
+    // fetch AbortController abort() 会抛出 DOMException: AbortError
+    if (error instanceof DOMException && error.name === 'AbortError') return true;
+    if (typeof error === 'object' && error !== null && (error as any).name === 'AbortError') {
+      return true;
+    }
+    return false;
+  };
+
   const handleGenerate = async (options?: { chapterId?: string; existingTaskId?: string }) => {
     const targetChapterId = options?.chapterId || editingId;
     if (!targetChapterId) return;
@@ -786,10 +799,15 @@ export default function Chapters() {
     }
 
     try {
+      // 每次生成都创建一个新的 AbortController，便于用户中途取消
+      const abortController = new AbortController();
+      singleChapterAbortRef.current = abortController;
+
       setIsContinuing(true);
       setIsGenerating(true);
       setSingleChapterProgress(0);
       setSingleChapterProgressMessage('准备开始生成...');
+      setSingleChapterProgressVisible(true);
       setTaskProgress(uiTaskId, 0, '准备开始生成...');
 
       const result = await generateChapterContentStream(
@@ -813,7 +831,8 @@ export default function Chapters() {
           setTaskProgress(uiTaskId, progressValue, progressMsg);
         },
         selectedModel,  // 传递选中的模型
-        temporaryNarrativePerspective  // 传递临时人称参数
+        temporaryNarrativePerspective,  // 传递临时人称参数
+        abortController.signal
       );
 
       message.success('AI创作成功，正在分析章节内容...');
@@ -837,16 +856,24 @@ export default function Chapters() {
         startPollingTask(targetChapterId);
       }
     } catch (error) {
+      if (isAbortError(error)) {
+        message.info('已取消章节生成');
+        markTaskCancelled(uiTaskId, `${chapterName}已取消`);
+        return;
+      }
+
       const apiError = error as ApiError;
       const errorMessage =
         apiError.response?.data?.detail || apiError.message || '未知错误';
       message.error('AI创作失败：' + errorMessage);
       markTaskFailed(uiTaskId, errorMessage);
     } finally {
+      singleChapterAbortRef.current = null;
       setIsContinuing(false);
       setIsGenerating(false);
       setSingleChapterProgress(0);
       setSingleChapterProgressMessage('');
+      setSingleChapterProgressVisible(true);
     }
   };
 
@@ -907,44 +934,15 @@ export default function Chapters() {
       okText: '开始创作',
       okButtonProps: { danger: true },
       cancelText: '取消',
-      onOk: async () => {
-        instance.update({
-          okButtonProps: { danger: true, loading: true },
-          cancelButtonProps: { disabled: true },
-          closable: false,
-          maskClosable: false,
-          keyboard: false,
-        });
+      onOk: () => {
+        if (!selectedStyleId) {
+          message.error('请先选择写作风格');
+          return;
+        }
 
-        try {
-          if (!selectedStyleId) {
-            message.error('请先选择写作风格');
-            instance.update({
-              okButtonProps: { danger: true, loading: false },
-              cancelButtonProps: { disabled: false },
-              closable: true,
-              maskClosable: true,
-              keyboard: true,
-            });
-            return;
-          }
-          await handleGenerate({ chapterId: chapter.id });
-          instance.destroy();
-        } catch {
-          instance.update({
-            okButtonProps: { danger: true, loading: false },
-            cancelButtonProps: { disabled: false },
-            closable: true,
-            maskClosable: true,
-            keyboard: true,
-          });
-        }
-      },
-      onCancel: () => {
-        if (isGenerating) {
-          message.warning('AI正在创作中，请等待完成');
-          return false;
-        }
+        // 关闭确认弹窗后再启动生成，避免弹窗本身把页面“卡住”
+        instance.destroy();
+        void handleGenerate({ chapterId: chapter.id });
       },
     });
   };
@@ -1047,6 +1045,7 @@ export default function Chapters() {
     setBatchUiTaskId(uiTaskId);
 
     try {
+      setBatchProgressModalVisible(true);
       setBatchGenerating(true);
       setBatchGenerateVisible(false); // 关闭配置对话框，避免遮挡进度弹窗
 
@@ -2964,14 +2963,29 @@ export default function Chapters() {
 
       {/* 单章节生成进度显示 */}
       <SSELoadingOverlay
-        loading={isGenerating}
+        loading={isGenerating && singleChapterProgressVisible}
         progress={singleChapterProgress}
         message={singleChapterProgressMessage}
+        onHide={() => {
+          setSingleChapterProgressVisible(false);
+          message.info('已转入任务中心，可继续操作（右下角可查看任务进度）');
+        }}
+        onCancel={() => {
+          modal.confirm({
+            title: '确认取消',
+            content: '确定要取消本章生成吗？未保存的内容将不会写入该章节。',
+            okText: '确定取消',
+            cancelText: '继续生成',
+            okButtonProps: { danger: true },
+            centered: true,
+            onOk: () => singleChapterAbortRef.current?.abort(),
+          });
+        }}
       />
 
       {/* 批量生成进度显示 - 使用统一的进度组件 */}
       <SSEProgressModal
-        visible={batchGenerating}
+        visible={batchGenerating && batchProgressModalVisible}
         progress={batchProgress ? Math.round((batchProgress.completed / batchProgress.total) * 100) : 0}
         message={
           batchProgress?.current_chapter_number
@@ -2979,6 +2993,10 @@ export default function Chapters() {
             : `批量生成进行中... (${batchProgress?.completed || 0}/${batchProgress?.total || 0})`
         }
         title="批量生成章节"
+        onMinimize={() => {
+          setBatchProgressModalVisible(false);
+          message.info('批量生成已转入任务中心，可继续浏览其他页面（右下角可查看进度）');
+        }}
         onCancel={() => {
           modal.confirm({
             title: '确认取消',

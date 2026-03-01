@@ -9,6 +9,8 @@ interface SSEProgressModalProps {
   title?: string;
   showPercentage?: boolean;
   showIcon?: boolean;
+  onMinimize?: () => void;
+  minimizeButtonText?: string;
   onCancel?: () => void;
   cancelButtonText?: string;
 }
@@ -24,6 +26,8 @@ export const SSEProgressModal: React.FC<SSEProgressModalProps> = ({
   title = 'AI生成中...',
   showPercentage = true,
   showIcon = true,
+  onMinimize,
+  minimizeButtonText = '隐藏',
   onCancel,
   cancelButtonText = '取消任务',
 }) => {
@@ -120,25 +124,34 @@ export const SSEProgressModal: React.FC<SSEProgressModalProps> = ({
           textAlign: 'center',
           fontSize: 13,
           color: 'var(--color-text-tertiary)',
-          marginBottom: onCancel ? 16 : 0
+          marginBottom: (onMinimize || onCancel) ? 16 : 0
         }}>
           请勿关闭页面，生成过程需要一定时间
         </div>
 
         {/* 取消按钮 */}
-        {onCancel && (
+        {(onMinimize || onCancel) && (
           <div style={{
             textAlign: 'center',
             marginTop: 16
           }}>
-            <Button
-              danger
-              size="large"
-              icon={<StopOutlined />}
-              onClick={onCancel}
-            >
-              {cancelButtonText}
-            </Button>
+            <div style={{ display: 'flex', justifyContent: 'center', gap: 12, flexWrap: 'wrap' }}>
+              {onMinimize && (
+                <Button size="large" onClick={onMinimize}>
+                  {minimizeButtonText}
+                </Button>
+              )}
+              {onCancel && (
+                <Button
+                  danger
+                  size="large"
+                  icon={<StopOutlined />}
+                  onClick={onCancel}
+                >
+                  {cancelButtonText}
+                </Button>
+              )}
+            </div>
           </div>
         )}
       </div>

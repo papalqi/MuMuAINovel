@@ -288,7 +288,8 @@ export function useChapterSync() {
     targetWordCount?: number,
     onProgressUpdate?: (message: string, progress: number) => void,
     model?: string,
-    narrativePerspective?: string
+    narrativePerspective?: string,
+    signal?: AbortSignal
   ) => {
     try {
       // 使用fetch处理流式响应
@@ -303,6 +304,7 @@ export function useChapterSync() {
           model: model,
           narrative_perspective: narrativePerspective
         }),
+        signal,
       });
 
       if (!response.ok) {
@@ -319,6 +321,7 @@ export function useChapterSync() {
       let buffer = '';
       let fullContent = '';
       let analysisTaskId: string | undefined;
+      let doneReceived = false;
 
       while (true) {
         const { done, value } = await reader.read();
@@ -338,56 +341,73 @@ export function useChapterSync() {
             continue;
           }
 
+          // 解析 SSE 的 event/data
+          const eventMatch = line.match(/^event: (.+)$/m);
+          const eventName = eventMatch?.[1]?.trim();
+          const dataMatch = line.match(/^data: (.+)$/m);
+          if (!dataMatch) continue;
+
+          let payload: any;
           try {
-            const dataMatch = line.match(/^data: (.+)$/m);
-            if (dataMatch) {
-              const message = JSON.parse(dataMatch[1]);
-              
-              if (message.type === 'start') {
-                // 开始生成
-                if (onProgressUpdate) {
-                  onProgressUpdate(message.message || '开始生成...', 0);
-                }
-              } else if (message.type === 'progress') {
-                // 进度更新
-                if (onProgressUpdate) {
-                  onProgressUpdate(
-                    message.message || '生成中...',
-                    message.progress || 0
-                  );
-                }
-              } else if ((message.type === 'content' || message.type === 'chunk') && message.content) {
-                fullContent += message.content;
-                if (onProgress) {
-                  onProgress(fullContent);
-                }
-              } else if (message.type === 'error') {
-                throw new Error(message.error || '生成失败');
-              } else if (message.type === 'result') {
-                // 结果消息，包含分析任务ID
-                if (message.data?.analysis_task_id) {
-                  analysisTaskId = message.data.analysis_task_id;
-                }
-                if (onProgressUpdate) {
-                  onProgressUpdate('生成完成', 100);
-                }
-              } else if (message.type === 'done') {
-                // 生成完成，刷新章节数据
-                await refreshChapters();
-              } else if (message.type === 'analysis_started') {
-                // 分析已开始
-                analysisTaskId = message.task_id;
-                if (onProgressUpdate) {
-                  onProgressUpdate('章节分析已开始...', 100);
-                }
-              } else if (message.type === 'analysis_queued') {
-                // 分析任务已加入队列
-                analysisTaskId = message.task_id;
-              }
-            }
+            payload = JSON.parse(dataMatch[1]);
           } catch (error) {
             console.error('解析SSE消息失败:', error);
+            continue;
           }
+
+          const messageType: string | undefined = payload?.type || eventName;
+
+          if (messageType === 'start') {
+            // 开始生成（兼容旧消息）
+            onProgressUpdate?.(payload?.message || '开始生成...', 0);
+          } else if (messageType === 'progress') {
+            // 进度更新
+            onProgressUpdate?.(
+              payload?.message || '生成中...',
+              payload?.progress || 0
+            );
+          } else if ((messageType === 'content' || messageType === 'chunk') && payload?.content) {
+            fullContent += payload.content;
+            onProgress?.(fullContent);
+          } else if (messageType === 'error') {
+            // ⚠️ 不能吞掉，否则前端会一直“看似在跑”但实际已失败
+            throw new Error(payload?.error || '生成失败');
+          } else if (messageType === 'result') {
+            // 结果消息，包含分析任务ID
+            if (payload?.data?.analysis_task_id) {
+              analysisTaskId = payload.data.analysis_task_id;
+            }
+            onProgressUpdate?.('生成完成', 100);
+          } else if (messageType === 'analysis_started') {
+            // 分析已开始（可能来自 event: analysis_started）
+            if (payload?.task_id) {
+              analysisTaskId = payload.task_id;
+            }
+            onProgressUpdate?.(payload?.message || '章节分析已开始...', 100);
+          } else if (messageType === 'analysis_queued') {
+            // 分析任务已加入队列
+            if (payload?.task_id) {
+              analysisTaskId = payload.task_id;
+            }
+          } else if (messageType === 'done') {
+            // 生成完成，刷新章节数据
+            doneReceived = true;
+            await refreshChapters();
+          }
+
+          if (doneReceived) {
+            break;
+          }
+        }
+
+        if (doneReceived) {
+          // 主动结束 reader，避免后端连接未及时关闭导致前端一直卡着
+          try {
+            await reader.cancel();
+          } catch {
+            // ignore
+          }
+          break;
         }
       }
 

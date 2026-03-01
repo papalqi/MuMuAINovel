@@ -1,17 +1,25 @@
 import React from 'react';
-import { Spin } from 'antd';
+import { Button, Space, Spin } from 'antd';
 import { LoadingOutlined } from '@ant-design/icons';
 
 interface SSELoadingOverlayProps {
   loading: boolean;
   progress: number;
   message: string;
+  onCancel?: () => void;
+  onHide?: () => void;
+  cancelButtonText?: string;
+  hideButtonText?: string;
 }
 
 export const SSELoadingOverlay: React.FC<SSELoadingOverlayProps> = ({
   loading,
   progress,
-  message
+  message,
+  onCancel,
+  onHide,
+  cancelButtonText = '取消生成',
+  hideButtonText = '隐藏'
 }) => {
   if (!loading) return null;
 
@@ -109,6 +117,23 @@ export const SSELoadingOverlay: React.FC<SSELoadingOverlayProps> = ({
         }}>
           请勿关闭页面,生成过程需要一定时间
         </div>
+
+        {(onHide || onCancel) && (
+          <div style={{ textAlign: 'center', marginTop: 20 }}>
+            <Space>
+              {onHide && (
+                <Button onClick={onHide}>
+                  {hideButtonText}
+                </Button>
+              )}
+              {onCancel && (
+                <Button danger onClick={onCancel}>
+                  {cancelButtonText}
+                </Button>
+              )}
+            </Space>
+          </div>
+        )}
       </div>
     </div>
   );
