@@ -1298,6 +1298,9 @@ async def analyze_chapter_background(
                 async with write_lock:
                     task.progress = 100
                     task.status = 'completed'
+                    # 若此前被 status 轮询标记过“超时/重试”等错误信息，这里在成功完成时清空，
+                    # 避免出现 status=completed 但 error_message 仍显示“任务超时”的误导性状态。
+                    task.error_message = None
                     task.completed_at = datetime.now()
                     await db_session.commit()
                     update_success = True
@@ -1899,8 +1902,8 @@ async def get_analysis_task_status(
     查询指定章节的最新分析任务状态
     
     自动恢复机制：
-    - 如果任务状态为running且超过1分钟未更新，自动标记为failed
-    - 如果任务状态为pending且超过2分钟未启动，自动标记为failed
+    - 如果任务状态为 running 且超过阈值仍未完成，自动标记为 failed（防止任务卡死导致 UI 永久等待）
+    - 如果任务状态为 pending 且超过阈值仍未启动，自动标记为 failed
     
     返回:
     - has_task: 是否存在分析任务
@@ -1968,13 +1971,16 @@ async def get_analysis_task_status(
     current_time = datetime.now()
     
     # 自动恢复卡住的任务
-    # 注意：后端分析有3次重试机制，每次重试会重置 started_at
-    # 所以超时时间需要足够长以支持完整的重试周期（约5分钟）
+    # ⚠️ 注意：
+    # - 章节分析会发起一次或多次大模型调用（含重试），且可能包含远端 embedding 写入；
+    #   实际耗时经常超过 3 分钟，因此阈值不能过小，否则会误判“卡住”。
+    # - started_at 仅表示任务开始时间，并不代表“最后一次进度更新时间”，因此这里只能使用
+    #   一个相对保守的超时时间。
     if task.status == 'running':
         # 检查是否正在重试（error_message 包含"重试"信息）
         is_retrying = task.error_message and '重试' in task.error_message
-        # 如果正在重试，给予更长的超时时间（5分钟），否则3分钟
-        timeout_minutes = 5 if is_retrying else 3
+        # 如果正在重试，给予更长的超时时间（30分钟），否则15分钟
+        timeout_minutes = 30 if is_retrying else 15
         
         # 如果任务在running状态超过超时时间，标记为失败
         if task.started_at and (current_time - task.started_at) > timedelta(minutes=timeout_minutes):
@@ -1988,16 +1994,26 @@ async def get_analysis_task_status(
             logger.warning(f"🔄 自动恢复卡住的任务: {task.id}, 章节: {chapter_id}")
     
     elif task.status == 'pending':
-        # 如果任务在pending状态超过3分钟仍未开始，标记为失败
-        if task.created_at and (current_time - task.created_at) > timedelta(minutes=3):
+        # 如果任务在pending状态超过5分钟仍未开始，标记为失败
+        if task.created_at and (current_time - task.created_at) > timedelta(minutes=5):
             task.status = 'failed'
-            task.error_message = '任务启动超时（超过3分钟未启动，已自动恢复）'
+            task.error_message = '任务启动超时（超过5分钟未启动，已自动恢复）'
             task.completed_at = current_time
             task.progress = 0
             auto_recovered = True
             await db.commit()
             await db.refresh(task)
             logger.warning(f"🔄 自动恢复未启动的任务: {task.id}, 章节: {chapter_id}")
+
+    # 若任务已完成，但仍残留“超时/重试”错误信息（历史遗留或被误判后又成功完成），自动清理。
+    if task.status == "completed" and task.error_message:
+        if ("任务超时" in task.error_message) or ("正在重试" in task.error_message):
+            try:
+                task.error_message = None
+                await db.commit()
+                await db.refresh(task)
+            except Exception as e:
+                logger.warning(f"⚠️ 清理已完成任务的 error_message 失败（不影响返回）: {e}")
     
     # 补充：分析结果/记忆数量（用于前端标记异常）
     has_analysis_result = False
