@@ -251,6 +251,55 @@ class MuMuClient:
 
         return result_data, content
 
+    def sse_get(
+        self,
+        path: str,
+        params: Dict[str, Any],
+        timeout: int = 3600,
+        tag: str = "SSE",
+    ) -> Tuple[Optional[Dict[str, Any]], str]:
+        """GET 方式的 SSE 请求。返回 (result_data, full_chunk_text)"""
+        r = self._request(
+            "GET",
+            path,
+            params=params,
+            stream=True,
+            timeout=(20, timeout),
+            retry=1,
+        )
+        if r.status_code >= 400:
+            raise RuntimeError(f"SSE(GET) {path} 失败: {r.status_code} {r.text[:300]}")
+
+        result_data = None
+        content = ""
+        last_p = None
+        for raw in r.iter_lines(decode_unicode=True):
+            if not raw:
+                continue
+            line = raw.strip()
+            if line.startswith(":") or line.startswith("event:"):
+                continue
+            if not line.startswith("data:"):
+                continue
+            obj = json.loads(line[5:].strip())
+            t = obj.get("type")
+
+            if t == "progress":
+                p = obj.get("progress")
+                if p in [0, 5, 10, 15, 20, 30, 40, 50, 60, 70, 80, 85, 90, 92, 95, 98, 100] and p != last_p:
+                    self.log(f"[{tag}] {p}% {obj.get('message', '')}")
+                    last_p = p
+            elif t == "chunk":
+                content += obj.get("content", "")
+            elif t == "result":
+                result_data = obj.get("data")
+            elif t == "error":
+                raise RuntimeError(f"SSE error: {obj.get('error')}")
+            elif t == "done":
+                break
+
+        return result_data, content
+
 
 # ========================= 流程函数 =========================
 
@@ -571,28 +620,50 @@ def run_main_workflow(runner: MuMuClient, style_id: int, best_preset_name: str, 
     # 设默认风格
     runner.post(f"/api/writing-styles/{style_id}/set-default", {"project_id": project_id})
 
-    # 职业、角色、大纲、展开
-    career_result, _ = runner.sse_post("/api/wizard-stream/career-system", {"project_id": project_id}, timeout=3600, tag="career")
-    char_result, _ = runner.sse_post(
-        "/api/wizard-stream/characters",
+    # 职业、角色、大纲、展开（向导仅生成世界观；其余改走项目内业务 API）
+    career_result, _ = runner.sse_get(
+        "/api/careers/generate-system",
         {
             "project_id": project_id,
-            # ⚠️ wizard-stream/characters 读取的是 count，不是 character_count
-            "count": int(main_cfg.get("character_target", 12)),
-            "requirements": main_cfg.get(
-                "character_requirements",
-                "请以人物角色为主（组织数量不超过总数20%），并保证主角与核心配角完整。",
-            ),
-            "theme": main_cfg.get("theme", ""),
-            "genre": main_cfg.get("genre", ""),
+            "main_career_count": int(main_cfg.get("main_career_count", 3)),
+            "sub_career_count": int(main_cfg.get("sub_career_count", 6)),
+            "enable_mcp": bool(main_cfg.get("career_enable_mcp", False)),
         },
         timeout=3600,
-        tag="characters",
+        tag="career",
     )
+
+    # 批量生成角色：/api/characters/generate-stream 是“单角色”接口，这里循环调用
+    char_target = int(main_cfg.get("character_target", 12))
+    created_chars = []
+    char_requirements = main_cfg.get(
+        "character_requirements",
+        "请以人物角色为主（组织数量不超过总数20%），并保证主角与核心配角完整。",
+    )
+    for i in range(char_target):
+        role_type = "protagonist" if i == 0 else "supporting"
+        res, _ = runner.sse_post(
+            "/api/characters/generate-stream",
+            {
+                "project_id": project_id,
+                "role_type": role_type,
+                "requirements": char_requirements,
+                "enable_mcp": True,
+            },
+            timeout=3600,
+            tag=f"character:{i+1}/{char_target}",
+        )
+        if res and isinstance(res, dict) and res.get("character"):
+            created_chars.append(res["character"])
+
+    char_result = {"requested": char_target, "created": created_chars}
+
     outline_result, _ = runner.sse_post(
-        "/api/wizard-stream/outline",
+        "/api/outlines/generate-stream",
         {
             "project_id": project_id,
+            "mode": "new",
+            "theme": main_cfg.get("theme", ""),
             "chapter_count": int(main_cfg.get("outline_count", 10)),
             "narrative_perspective": main_cfg.get("narrative_perspective", "第三人称"),
             "target_words": int(main_cfg.get("target_words", 120000)),

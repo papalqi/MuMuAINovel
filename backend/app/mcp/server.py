@@ -575,9 +575,6 @@ _ALIAS_CANDIDATES: List[Dict[str, str]] = [
     {"alias": "project_delete", "method": "DELETE", "path": "/api/projects/{project_id}", "description": "删除项目"},
     # 向导
     {"alias": "wizard_world_building", "method": "POST", "path": "/api/wizard-stream/world-building", "description": "流式生成世界观"},
-    {"alias": "wizard_career_system", "method": "POST", "path": "/api/wizard-stream/career-system", "description": "流式生成职业体系"},
-    {"alias": "wizard_characters", "method": "POST", "path": "/api/wizard-stream/characters", "description": "流式生成角色"},
-    {"alias": "wizard_outline", "method": "POST", "path": "/api/wizard-stream/outline", "description": "流式生成大纲"},
     # 大纲
     {"alias": "outlines_list", "method": "GET", "path": "/api/outlines/project/{project_id}", "description": "获取项目大纲"},
     {"alias": "outline_generate_stream", "method": "POST", "path": "/api/outlines/generate-stream", "description": "流式生成/续写大纲"},

@@ -109,7 +109,7 @@ export default function ProjectWizardNew() {
         创建新项目
       </Title>
       <Paragraph type="secondary" style={{ marginBottom: 32 }}>
-        填写基本信息后，AI将自动为您生成世界观（职业/角色/大纲可在项目内按需生成）
+        向导只会为您生成世界观并创建项目；职业/角色/大纲请在项目内按需生成。下方的“角色数量 / 大纲章节模式 / 目标字数”等仅作为项目配置保存。
       </Paragraph>
 
       <Form
@@ -188,7 +188,8 @@ export default function ProjectWizardNew() {
           label="大纲章节模式"
           name="outline_mode"
           rules={[{ required: true, message: '请选择大纲章节模式' }]}
-          tooltip="创建后不可更改，请根据创作习惯选择"
+          tooltip="创建后不可更改。用于后续大纲如何展开成章节（向导不生成大纲/章节）。"
+          extra="提示：项目创建完成后，请在“大纲”页面生成大纲并展开成章节。"
         >
           <Radio.Group size="large">
             <Row gutter={16}>
@@ -209,7 +210,7 @@ export default function ProjectWizardNew() {
                         传统模式 (1→1)
                       </div>
                       <div style={{ fontSize: 12, color: '#666' }}>
-                        一个大纲对应一个章节，简单直接
+                        一个大纲对应一个章节（后续可一键创建对应章节）
                       </div>
                       <div style={{ fontSize: 11, color: '#999' }}>
                         💡 适合：简单剧情、快速创作、短篇小说
@@ -236,7 +237,7 @@ export default function ProjectWizardNew() {
                         细化模式 (1→N) 推荐
                       </div>
                       <div style={{ fontSize: 12, color: '#666' }}>
-                        一个大纲可展开为多个章节，灵活控制
+                        一个大纲可展开为多个章节（后续可批量展开）
                       </div>
                       <div style={{ fontSize: 11, color: '#999' }}>
                         💡 适合：复杂剧情、长篇创作、需要细化控制
@@ -265,9 +266,10 @@ export default function ProjectWizardNew() {
           </Col>
           <Col xs={24} sm={12}>
             <Form.Item
-              label="角色数量"
+              label="计划角色数量"
               name="character_count"
               rules={[{ required: true, message: '请输入角色数量' }]}
+              tooltip="仅作为项目配置保存，向导不会生成角色；可在“角色”页面按需生成。"
             >
               <InputNumber
                 min={3}
@@ -275,7 +277,7 @@ export default function ProjectWizardNew() {
                 style={{ width: '100%' }}
                 size="large"
                 addonAfter="个"
-                placeholder="AI生成的角色数量"
+                placeholder="计划角色数量（向导不生成）"
               />
             </Form.Item>
           </Col>
@@ -285,13 +287,14 @@ export default function ProjectWizardNew() {
           label="目标字数"
           name="target_words"
           rules={[{ required: true, message: '请输入目标字数' }]}
+          tooltip="用于进度统计与写作规划；不会影响向导生成内容。"
         >
           <InputNumber
             min={10000}
             style={{ width: '100%' }}
             size="large"
             addonAfter="字"
-            placeholder="整部小说的目标字数"
+            placeholder="全书目标字数（用于进度统计）"
           />
         </Form.Item>
 

@@ -42,7 +42,6 @@ AI_ROUTE_VERSION = "1.0"
 # 前端使用这些 key 显示配置项；后端在各 API 调用点选择对应 key。
 AI_ROUTE_TASKS: list[dict[str, str]] = [
     {"key": "wizard_world_building", "label": "向导：世界观生成", "category": "向导"},
-    {"key": "wizard_outline", "label": "向导：大纲生成", "category": "向导"},
     {"key": "inspiration_options", "label": "灵感模式：生成选项", "category": "灵感"},
     {"key": "outline_generate", "label": "大纲：生成/续写", "category": "大纲"},
     {"key": "outline_expand", "label": "大纲：展开章节规划", "category": "大纲"},

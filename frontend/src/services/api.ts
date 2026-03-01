@@ -25,8 +25,6 @@ import type {
   GenerateOutlineRequest,
   GenerateCharacterRequest,
   PolishTextRequest,
-  GenerateCharactersResponse,
-  GenerateOutlineResponse,
   Settings,
   SettingsUpdate,
   WritingStyle,
@@ -872,75 +870,6 @@ export const wizardStreamApi = {
     options
   ),
 
-  generateCharactersStream: (
-    data: {
-      project_id: string;
-      count?: number;
-      world_context?: Record<string, string>;
-      theme?: string;
-      genre?: string;
-      requirements?: string;
-      provider?: string;
-      model?: string;
-    },
-    options?: SSEClientOptions
-  ) => ssePost<GenerateCharactersResponse>(
-    '/api/wizard-stream/characters',
-    data,
-    options
-  ),
-
-  generateCareerSystemStream: (
-    data: {
-      project_id: string;
-      provider?: string;
-      model?: string;
-    },
-    options?: SSEClientOptions
-  ) => ssePost<{
-    project_id: string;
-    main_careers_count: number;
-    sub_careers_count: number;
-    main_careers: string[];
-    sub_careers: string[];
-  }>(
-    '/api/wizard-stream/career-system',
-    data,
-    options
-  ),
-
-  generateCompleteOutlineStream: (
-    data: {
-      project_id: string;
-      chapter_count: number;
-      narrative_perspective: string;
-      target_words?: number;
-      requirements?: string;
-      provider?: string;
-      model?: string;
-    },
-    options?: SSEClientOptions
-  ) => ssePost<GenerateOutlineResponse>(
-    '/api/wizard-stream/outline',
-    data,
-    options
-  ),
-
-  updateWorldBuildingStream: (
-    projectId: string,
-    data: {
-      time_period?: string;
-      location?: string;
-      atmosphere?: string;
-      rules?: string;
-    },
-    options?: SSEClientOptions
-  ) => ssePost<WorldBuildingResponse>(
-    `/api/wizard-stream/world-building/${projectId}`,
-    data,
-    options
-  ),
-
   regenerateWorldBuildingStream: (
     projectId: string,
     data?: {
@@ -951,15 +880,6 @@ export const wizardStreamApi = {
   ) => ssePost<WorldBuildingResponse>(
     `/api/wizard-stream/world-building/${projectId}/regenerate`,
     data || {},
-    options
-  ),
-
-  cleanupWizardDataStream: (
-    projectId: string,
-    options?: SSEClientOptions
-  ) => ssePost<{ message: string; deleted: { characters: number; outlines: number; chapters: number } }>(
-    `/api/wizard-stream/cleanup/${projectId}`,
-    {},
     options
   ),
 };

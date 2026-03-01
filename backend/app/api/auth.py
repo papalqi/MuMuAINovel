@@ -153,7 +153,7 @@ async def local_login(request: LocalLoginRequest, response: Response):
     
     # Settings 将在首次访问设置页面时自动创建（延迟初始化）
     
-    # 设置 Cookie（2小时有效）
+    # 设置 Cookie（按 SESSION_EXPIRE_MINUTES 配置，默认 7 天）
     max_age = settings.SESSION_EXPIRE_MINUTES * 60
     response.set_cookie(
         key="user_id",
@@ -264,7 +264,7 @@ async def _handle_callback(
     logger.info(f"OAuth回调成功，重定向到前端: {redirect_url}")
     redirect_response = RedirectResponse(url=redirect_url)
     
-    # 设置 httponly Cookie（2小时有效）
+    # 设置 httponly Cookie（按 SESSION_EXPIRE_MINUTES 配置，默认 7 天）
     max_age = settings.SESSION_EXPIRE_MINUTES * 60
     redirect_response.set_cookie(
         key="user_id",
@@ -526,7 +526,7 @@ async def bind_account_login(request: LocalLoginRequest, response: Response):
     
     # Settings 将在首次访问设置页面时自动创建（延迟初始化）
     
-    # 设置 Cookie（2小时有效）
+    # 设置 Cookie（按 SESSION_EXPIRE_MINUTES 配置，默认 7 天）
     max_age = settings.SESSION_EXPIRE_MINUTES * 60
     response.set_cookie(
         key="user_id",

@@ -118,7 +118,10 @@ class Settings(BaseSettings):
     LOCAL_AUTH_DISPLAY_NAME: str = "本地用户"  # 本地用户显示名称
 
     # 会话配置
-    SESSION_EXPIRE_MINUTES: int = 120  # 会话过期时间（分钟），默认2小时
+    # 会话过期时间（分钟）
+    # - 之前默认 2 小时，频繁掉线影响写作体验
+    # - 现在默认 7 天（10080 分钟）；仍可通过环境变量 SESSION_EXPIRE_MINUTES 覆盖
+    SESSION_EXPIRE_MINUTES: int = 60 * 24 * 7
     SESSION_REFRESH_THRESHOLD_MINUTES: int = 30  # 会话刷新阈值（分钟），剩余时间少于此值时可刷新
 
     # 提示词工坊配置
